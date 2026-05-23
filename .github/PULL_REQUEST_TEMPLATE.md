@@ -6,8 +6,9 @@ labels: enhancement
 
 ## Which contribution opportunity
 
-Reference the section in `CONTRIBUTING.md` (e.g. "1. PoS-derived
-`ForkChoice` instantiation") or the FINDINGS.md cross-reference.
+Reference the section in `CONTRIBUTING.md` (e.g.
+"1. Refined `CompliantWith` capturing sequential dependence")
+or the FINDINGS.md cross-reference.
 
 ## Scope
 

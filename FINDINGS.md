@@ -28,7 +28,9 @@ FORMALIZATION` (the formalization handles it directly).
 
 ## Executive summary
 
-For a reader with five minutes, two of the items below are
+This formalization proves FOCIL's 1-of-N censorship-resistance
+guarantee end-to-end, derived from Ethereum's standard ">2/3
+honest validators" assumption. Two of the items below are
 substantive observations the formalization surfaced; the rest
 are spec-hygiene issues and disclosed model limitations.
 
@@ -631,51 +633,99 @@ is what forced the per-attester store relativisation).
 
 ## 5. Where the formalization is conditional
 
-The safety theorem proves _implication_: given two assumptions
-about the fork-choice rule, censorship resistance follows. The two
-assumptions are propositional fields of the `ForkChoice` structure
-in `Focil/ForkChoice.lean`:
+The safety theorems are stated at two levels:
 
-1. **`quorum_has_honest_voter`.** Any block satisfying the abstract
-   `HasQuorum` predicate has at least one validator who is
-   `IsHonest` and `Voted` for it.
-2. **`honest_attester_compliance`.** Any honest validator who voted
-   for a block did so only if the block is FOCIL-compliant
-   _against the bundled `state` under the bundled `full`_.
+### 5.1 The headline 1-of-N theorem and its building blocks
 
-These obligations are properties of any concrete `ForkChoice`
-value. `Tests/Examples.lean` ships two instances:
+`Focil.focil_one_of_n_protection`,
+`Focil.focil_censorship_resistance`,
+`Focil.censoring_block_not_canonical`, and
+`Focil.canonical_implies_compliant` (all in `Focil/Safety.lean`
+and `Focil/ForkChoice.lean`) prove _implication_: given two
+propositional obligations of the `ForkChoice` structure
+(`quorum_has_honest_voter` and `honest_attester_compliance`),
+censorship resistance follows. The Lean kernel reports that
+all four theorems depend on **zero** kernel axioms.
+
+These obligations are properties any concrete `ForkChoice`
+value must discharge. `Tests/Examples.lean` ships two
+hand-crafted instances:
 
 - **`emptyForkChoice`** discharges both vacuously by setting
-  `HasQuorum` and `Voted` to constantly-false predicates. Useful
-  only as a structural sanity check that the safety theorem
-  type-checks against a real `ForkChoice` value.
+  `HasQuorum` and `Voted` to constantly-false predicates.
+  Useful only as a structural sanity check.
 
 - **`threeValidatorForkChoice`** is a non-vacuous 3-validator
-  scenario where:
-    - validators 0 and 1 are honest, validator 2 is Byzantine;
-    - both honest validators voted for `blockIncludes` (which
-      contains the IL transaction `tx1`);
-    - `blockIncludes` has a quorum;
-    - `quorum_has_honest_voter` is discharged by exhibiting
-      validator 0 as a witness;
-    - `honest_attester_compliance` is discharged by case-analysing
-      on `Voted` to learn the only voted-for block is
-      `blockIncludes`, then proving `blockIncludes` is compliant
-      against the store by direct case analysis on
-      `stored_ils.[ilHonest].transactions = [tx1]`.
+  scenario where both obligations are discharged by genuine
+  case analysis. Scenarios 6–11 fire the safety theorems
+  against this instance.
 
-    Scenarios 7 and 8 in `Tests/Examples.lean` fire
-    `focil_censorship_resistance` and
-    `censoring_block_not_canonical` respectively against this
-    instance, demonstrating the main theorem on a real (if small)
-    scenario.
+### 5.2 The PoS-derived end-to-end theorem
 
-A non-vacuous instantiation against an actual model of LMD-GHOST
-attester voting (one whose `HasQuorum`, `Voted`, and the two
-soundness obligations are _derived_ from a primitive ">2/3 honest
-stake" assumption rather than postulated) is the largest piece of
-follow-on work in this project. See CONTRIBUTING.md.
+`Focil.focil_pos_derived_safety` in `Focil/StakeModel.lean`
+discharges _both_ `ForkChoice` obligations from a more
+primitive ">2/3 honest validators" assumption, the same
+assumption that underlies every other Ethereum PoS safety
+result.
+
+The construction uses two structures:
+
+- `StakeModel`, carrying a per-validator honesty predicate
+  and the strict-supermajority assumption
+  `3 * |honest| > 2 * numValidators`.
+- `AttesterRun s`, carrying the per-attestation context (store
+  snapshot, fullness model, vote relation) and the per-attester
+  rule "honest validators only vote for FOCIL-compliant
+  blocks".
+
+A constructive function `AttesterRun.toForkChoice` packages
+these into a `ForkChoice` value, deriving
+`quorum_has_honest_voter` from a counting-pigeonhole argument
+(if both honest stake and quorum stake exceed 2/3, the
+intersection is non-empty) and `honest_attester_compliance`
+directly from the per-attester rule.
+
+The end-to-end safety theorem `focil_pos_derived_safety`
+composes this with `focil_one_of_n_protection` to give:
+
+> Under Ethereum's standard >2/3 honest-validator assumption
+> and the per-attester compliance rule, any non-equivocating
+> IL listing `tx` forces `tx` into any canonical block
+> (modulo invalidity and block fullness).
+
+`Tests/Examples.lean` Scenario 12 fires this theorem against a
+concrete 4-validator scenario.
+
+### 5.3 Axiom dependencies
+
+The four theorems in §5.1 depend on zero kernel axioms.
+`AttesterRun.toForkChoice` and `focil_pos_derived_safety` in
+§5.2 depend on `propext` and `Quot.sound` (transitively, via
+the counting argument's use of `omega` and `simp` on
+`List.length` lemmas). Both are foundational kernel axioms
+that ship with every Lean installation; neither gives
+classical logic. `Classical.choice` and `sorryAx` are not
+used anywhere in the project.
+
+### 5.4 Remaining axioms-of-faith
+
+After the §5.2 derivation, the only remaining substantive
+assumptions are:
+
+- **Ethereum's standard ">2/3 honest" supermajority**, encoded
+  as `StakeModel.honest_majority`. This is the same assumption
+  underlying every other Ethereum PoS safety result.
+- **The per-attester compliance rule**, encoded as
+  `AttesterRun.honest_rule`. This is the normative rule
+  EIP-7805 specifies for honest attester behaviour.
+- **Faithfulness of the abstract `CanAppend` predicate**, the
+  formal counterpart of "EVM-valid appendability." The theorem
+  is universally quantified over `CanAppend`; a real claim
+  against a real Ethereum implementation requires a faithful
+  concrete `CanAppend`. See §4.3.
+- **Faithful population of `state.stored_ils` and
+  `state.equivocators`** by an honest execution of
+  `on_inclusion_list`. See §2.6.
 
 ---
 
@@ -689,20 +739,23 @@ To set expectations precisely:
 - **No IL gossip / network model.** Network adversaries that
   delay IL propagation are not modelled; their attack surface is
   captured by the precondition `il ∈ state.stored_ils`.
-- **No cross-slot reasoning.** The safety theorem talks about a
-  single block at a single slot. Long-range censorship across many
-  slots is not modelled.
-- **No proof-of-stake economics.** Slashing, stake weighting,
-  attester rewards, and the underlying BFT assumption are absent.
-  The fork choice's `HasQuorum` is a binary predicate.
-- **No model of equivocator detection.** `state.equivocators` is
-  taken as input (§2.6).
+- **No cross-slot reasoning.** The safety theorems talk about
+  a single block at a single slot. Long-range censorship
+  across many slots is not modelled.
+- **No stake-weighted PoS.** `StakeModel.honest_majority`
+  treats each validator as one stake unit. A weighted variant
+  would multiply each `filter` count by `weight` and adjust
+  the supermajority condition accordingly. The counting
+  argument generalises but is left as follow-on work.
+- **No slashing or rewards.** Economic incentives, attester
+  rewards, and the underlying BFT proof of `>2/3 honest stake`
+  itself are absent.
+- **No model of equivocator detection.** `state.equivocators`
+  is taken as input (§2.6).
 - **No model of sequential validity dependence among IL
-  transactions.** `CompliantWith` reads `CanAppend` against the
-  block as proposed, not against a tentative post-state (§2.5).
-- **No PoS-derived `ForkChoice` instance** (§5). The non-vacuous
-  example `threeValidatorForkChoice` is a hand-crafted toy
-  scenario, not a refinement against an LMD-GHOST model.
+  transactions.** `CompliantWith` reads `CanAppend` against
+  the block as proposed, not against a tentative post-state
+  (§2.5).
 
 Each of these is a candidate for a follow-on formalisation.
 
@@ -712,50 +765,55 @@ Each of these is a candidate for a follow-on formalisation.
 
 The contribution of this repository is:
 
-1. A **type-checked** Lean 4 model of FOCIL's data structures and
-   compliance rule, faithful to `consensus-specs` `eip7805/`
-   modulo the simplifications disclosed in §2.5, §2.6, §4.1–§4.3,
-   and §6.
-2. A **type-checked** headline theorem,
-   `Focil.focil_one_of_n_protection`, that states FOCIL's 1-of-N
-   censorship-resistance guarantee precisely: it suffices that
-   _at least one_ non-equivocating IL committee member listed
-   the transaction for it to be force-included in any canonical
-   block (modulo invalidity and block fullness). The witness IL
-   is existentially quantified.
-3. A **per-IL building block**, `Focil.focil_censorship_resistance`,
-   which takes the witness IL as an explicit parameter. The
-   headline theorem is a thin corollary.
-4. A **completed proof** of both theorems given the abstract
-   `CanAppend` opaque definition and the two `ForkChoice`
-   structural obligations stated in §5. No `sorry`. The Lean
-   kernel confirms (via `#print axioms`) that the proofs depend
-   on **zero kernel axioms**, not even `Classical.choice` or
-   `propext`. This is true _modulo_ the `ForkChoice` obligations
-   being supplied by the consumer.
-5. A **completed proof** of the contrapositive corollary,
-   `Focil.censoring_block_not_canonical`, useful as a
-   builder-side incentive statement.
-6. A **non-vacuous concrete instance**
-   (`threeValidatorForkChoice`) demonstrating both theorems
-   firing on a real (if small) scenario. Building this instance
-   surfaced finding §2.7: the honest-attester invariant must be
+1. A **type-checked** Lean 4 model of FOCIL's data structures
+   and compliance rule, faithful to `consensus-specs`
+   `eip7805/` modulo the simplifications disclosed in §2.5,
+   §2.6, §4.1–§4.3, and §6.
+2. A **type-checked** end-to-end PoS-derived safety theorem,
+   `Focil.focil_pos_derived_safety`, deriving FOCIL's 1-of-N
+   censorship-resistance guarantee from Ethereum's standard
+   ">2/3 honest validators" assumption. No `ForkChoice`
+   postulates remain; both structural obligations are derived
+   via the counting-pigeonhole argument in
+   `Focil/StakeModel.lean`.
+3. A **type-checked** headline 1-of-N theorem,
+   `Focil.focil_one_of_n_protection`, that states the same
+   guarantee against an abstract `ForkChoice`. The
+   PoS-derived theorem in (2) is a corollary.
+4. A **per-IL building block**,
+   `Focil.focil_censorship_resistance`, which takes the
+   witness IL as an explicit parameter. The 1-of-N theorem in
+   (3) is a thin existential-elimination corollary.
+5. A **completed proof** of all four theorems plus the
+   contrapositive `Focil.censoring_block_not_canonical`. No
+   `sorry`. The Lean kernel reports that the four pure safety
+   theorems depend on **zero** kernel axioms; the PoS-derived
+   theorem additionally depends on `propext` and `Quot.sound`
+   (used by the counting argument). `Classical.choice` and
+   `sorryAx` are not used anywhere.
+6. A **non-vacuous concrete `ForkChoice` instance**
+   (`threeValidatorForkChoice`) and a **PoS-derived `StakeModel`
+   plus `AttesterRun`** (`stakeModel4v`/`attesterRun4v`),
+   demonstrating each theorem firing on a real scenario.
+   Building the abstract `ForkChoice` instance surfaced
+   finding §2.7: the honest-attester invariant must be
    relativized to the attester's local store, not universally
    quantified.
 7. This `FINDINGS.md`, with **two substantive observations**
    (§2.4 and §2.7) that the formalization surfaced, plus
    spec-hygiene issues (§1.2, §1.3, §2.1) and disclosed model
-   limitations (§2.5, §2.6). Smaller cross-references in §1.1,
-   §1.4, §2.2, and §2.3 round out the document.
+   limitations (§2.5, §2.6). Smaller cross-references in
+   §1.1, §1.4, §2.2, and §2.3 round out the document.
 
 What the safety theorems do **not** prove:
 
-- They do not derive censorship resistance from PoS first
-  principles. The two `ForkChoice` obligations are postulated.
 - They do not prove correctness against a real EVM.
   `CanAppend` is opaque.
 - They do not prove correctness in the presence of sequential
   validity dependence between IL transactions (§2.5).
+- They do not derive the >2/3 honest-validator assumption
+  itself; that is the standard Ethereum PoS axiom-of-faith
+  the entire ecosystem rests on.
 
 These are the natural seams along which the formalisation should
 grow. Each is a concrete invitation for follow-on work; see

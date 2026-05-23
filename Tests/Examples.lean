@@ -31,6 +31,11 @@
   - **Headline 1-of-N theorem** (Scenario 11): fires
     `focil_one_of_n_protection` against the 3-validator
     instance, with the witness IL produced existentially.
+  - **PoS-derived end-to-end** (Scenario 12): builds a
+    `StakeModel` and `AttesterRun` from scratch, derives both
+    `ForkChoice` obligations from a >2/3 honest validator
+    assumption via `AttesterRun.toForkChoice`, and fires
+    `focil_pos_derived_safety` with no postulates remaining.
 -/
 
 import FocilLean4
@@ -587,6 +592,134 @@ example
   -- Apply the headline theorem.
   exact focil_one_of_n_protection
     threeValidatorForkChoice blockIncludes tx1
+    h_witness h_can_append h_block_not_full h_canonical
+
+-- =========================================================================
+-- The PoS-derived end-to-end theorem firing on a concrete stake model
+-- =========================================================================
+
+/-
+  ## Scenario design (Scenario 12)
+
+  Where Scenarios 6–11 use the pre-built
+  `threeValidatorForkChoice` and postulate the two `ForkChoice`
+  obligations directly, this scenario constructs a `StakeModel`
+  and `AttesterRun` from scratch, derives the obligations from
+  Ethereum's standard ">2/3 honest validators" assumption, and
+  fires the end-to-end safety theorem
+  `focil_pos_derived_safety`.
+
+  - 3 validators (indices 0, 1, 2).
+  - validators 0 and 1 are honest, validator 2 is Byzantine.
+  - 2 of 3 honest is *not* > 2/3 of 3, so we use 4 validators
+    instead: indices 0, 1, 2 honest, validator 3 Byzantine.
+    3 of 4 > 2/3 * 4 = 8/3, satisfied since 3 * 3 = 9 > 8.
+  - All three honest validators voted for `blockIncludes`.
+    3 of 4 > 2/3 again, so quorum is achieved by the same
+    counting.
+-/
+
+/-- Honesty predicate for the 4-validator scenario. -/
+def isHonest4v (v : ValidatorIndex) : Bool :=
+  v = 0 ∨ v = 1 ∨ v = 2
+
+/-- The 4-validator stake model. -/
+def stakeModel4v : StakeModel where
+  numValidators   := 4
+  honest          := isHonest4v
+  honest_majority := by
+    -- 3 * |honest| > 2 * 4, i.e., 3 * 3 > 8.
+    decide
+
+/-- Vote relation for the 4-validator scenario: the three honest
+    validators voted for `blockIncludes`. -/
+def voted4v (v : ValidatorIndex) (b : Block) : Bool :=
+  isHonest4v v ∧ b = blockIncludes
+
+/--
+  The 4-validator attester run.
+
+  `honest_rule` is discharged by the same case analysis used in
+  Scenario 5 (`emptyForkChoice`'s richer cousin
+  `threeValidatorForkChoice`): the only block honest validators
+  voted for is `blockIncludes`, and `blockIncludes` is
+  FOCIL-compliant against `stateHonest`.
+-/
+def attesterRun4v : AttesterRun stakeModel4v where
+  state       := stateHonest
+  full        := neverFull
+  voted       := voted4v
+  honest_rule := by
+    intro v b _hHonest hVoted
+    -- voted4v unfolds to (isHonest4v v ∧ b = blockIncludes),
+    -- where conjunction is `Bool.and`. Decompose to learn
+    -- b = blockIncludes.
+    have hb : b = blockIncludes := by
+      simp [voted4v, Bool.and_eq_true] at hVoted
+      exact hVoted.2
+    subst hb
+    -- Compliance of `blockIncludes` against `stateHonest`,
+    -- exactly as proven in Scenario 2.
+    intro il hIl _hCons tx hTx
+    simp [stateHonest] at hIl
+    subst hIl
+    simp [ilHonest] at hTx
+    subst hTx
+    left
+    simp [blockIncludes]
+
+/--
+  **Scenario 12: end-to-end PoS-derived FOCIL safety.**
+
+  This is the marquee result of the project, demonstrated on a
+  concrete 4-validator scenario.
+
+  Starting points:
+  - `stakeModel4v.honest_majority`: 3 of 4 validators are
+    honest, > 2/3 (proven by `decide`).
+  - `attesterRun4v.honest_rule`: honest validators only vote
+    for FOCIL-compliant blocks.
+  - A quorum hypothesis: `blockIncludes` was voted for by all
+    three honest validators (3 of 4 > 2/3, proven below).
+  - The standard 1-of-N witness: `ilHonest` lists `tx1` and is
+    not equivocating.
+  - `tx1` is appendable to `blockIncludes` and the block is
+    not full.
+
+  Conclusion: `tx1 ∈ blockIncludes.transactions`.
+
+  No `ForkChoice` obligations are postulated. Both are derived
+  by `AttesterRun.toForkChoice` from the supermajority and
+  honest-rule assumptions above.
+-/
+example
+    (h_can_append : CanAppend tx1 blockIncludes) :
+    tx1 ∈ blockIncludes.transactions := by
+  have h_witness :
+      ∃ il, il ∈ attesterRun4v.state.stored_ils
+            ∧ IsConsidered attesterRun4v.state il
+            ∧ tx1 ∈ il.transactions := by
+    refine ⟨ilHonest, ?_, ?_, ?_⟩
+    · simp [attesterRun4v, stateHonest]
+    · simp [attesterRun4v, IsConsidered, IsHonestlyAttributed,
+            stateHonest]
+    · simp [ilHonest]
+  have h_block_not_full :
+      ¬ attesterRun4v.full blockIncludes := by
+    intro h
+    exact h
+  have h_canonical :
+      IsCanonical attesterRun4v.toForkChoice blockIncludes := by
+    -- Quorum hypothesis: 3 of 4 voted for blockIncludes.
+    -- IsCanonical fc b ≡ fc.HasQuorum b ≡ attesterRun4v.hasQuorum b
+    -- which is 3 * |voters| > 2 * 4. With three honest voters
+    -- voting for blockIncludes, |voters| = 3, so 9 > 8.
+    show attesterRun4v.hasQuorum blockIncludes
+    show 3 * (((List.range 4).filter
+              (fun v => voted4v v blockIncludes)).length) > 8
+    decide
+  exact focil_pos_derived_safety
+    attesterRun4v blockIncludes tx1
     h_witness h_can_append h_block_not_full h_canonical
 
 end Examples

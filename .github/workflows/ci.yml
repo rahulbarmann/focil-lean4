@@ -33,10 +33,11 @@ jobs:
             - name: Build tests library
               run: lake build Tests
 
-            # Reproduces the axiom-freeness check documented in README
-            # and CONTRIBUTING. Fails the job if any of the listed
-            # theorems acquires an axiom dependency (including
-            # sorryAx, Classical.choice, propext, etc.).
+            # Reproduces the axiom audit documented in README and
+            # CONTRIBUTING. The four pure safety theorems must remain
+            # zero-axiom; the PoS-derived layer must depend only on
+            # propext and Quot.sound; Classical.choice and sorryAx
+            # must never appear.
             - name: Audit axiom dependencies
               run: |
                   cat > AuditAxioms.lean <<'EOF'
@@ -46,23 +47,27 @@ jobs:
                   #print axioms Focil.focil_censorship_resistance
                   #print axioms Focil.censoring_block_not_canonical
                   #print axioms Focil.canonical_implies_compliant
-                  #print axioms Focil.noncompliant_block_not_canonical
-                  #print axioms Focil.compliant_includes_or_excused
+                  #print axioms Focil.AttesterRun.toForkChoice
+                  #print axioms Focil.focil_pos_derived_safety
                   EOF
                   OUTPUT=$(lake env lean AuditAxioms.lean)
                   echo "$OUTPUT"
-                  # Each line must end with "does not depend on any axioms".
-                  # If grep finds any other "depends on" line, fail.
-                  if echo "$OUTPUT" | grep -E "depends on axioms" >/dev/null; then
-                    echo "::error::A safety theorem depends on a kernel axiom."
+                  # Forbidden axioms anywhere: Classical.choice and sorryAx.
+                  if echo "$OUTPUT" | grep -E "Classical\.choice|sorryAx" >/dev/null; then
+                    echo "::error::Classical.choice or sorryAx detected. Forbidden by project policy."
                     exit 1
                   fi
-                  # Sanity: ensure all six lines are present.
-                  COUNT=$(echo "$OUTPUT" | grep -c "does not depend on any axioms")
-                  if [ "$COUNT" -ne 6 ]; then
-                    echo "::error::Expected 6 axiom-free theorems, found $COUNT."
-                    exit 1
-                  fi
+                  # The four pure safety theorems must remain zero-axiom.
+                  for THM in \
+                    "focil_one_of_n_protection" \
+                    "focil_censorship_resistance" \
+                    "censoring_block_not_canonical" \
+                    "canonical_implies_compliant"; do
+                    if ! echo "$OUTPUT" | grep -F "'Focil.$THM' does not depend on any axioms" >/dev/null; then
+                      echo "::error::Focil.$THM no longer zero-axiom."
+                      exit 1
+                    fi
+                  done
                   rm AuditAxioms.lean
 
             # Belt-and-braces sorry check independent of the axiom

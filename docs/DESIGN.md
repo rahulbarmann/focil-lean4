@@ -51,16 +51,18 @@ that motivated EIP-7805; it does not extend its scope.
 
 ## 2. Abstraction layering
 
-The five files in `Focil/` form a strict dependency chain:
+The six files in `Focil/` form a strict dependency chain:
 
 ```
-Types.lean       (no dependencies)
+Types.lean        (no dependencies)
    ↓
-Protocol.lean    (depends on Types)
+Protocol.lean     (depends on Types)
    ↓
-ForkChoice.lean  (depends on Types, Protocol)  ←  Helpers.lean
-   ↓                                              (depends on Types, Protocol)
-Safety.lean      (depends on all of the above)
+ForkChoice.lean   (depends on Types, Protocol)  ←  Helpers.lean
+   ↓                                                (depends on Types, Protocol)
+Safety.lean       (depends on Types, Protocol, ForkChoice, Helpers)
+   ↓
+StakeModel.lean   (depends on all of the above)
 ```
 
 Each layer has exactly one job:
@@ -72,11 +74,20 @@ Each layer has exactly one job:
   evaluates, lifted from the spec's `validate_inclusion_lists`.
 - **`ForkChoice.lean`**: the soundness story. Bundles a store
   snapshot, a fullness model, and the two propositional
-  obligations on attester voting that the safety argument needs.
-  Proves the cornerstone lemma `canonical_implies_compliant`.
+  obligations on attester voting that the safety argument
+  needs. Proves the cornerstone lemma
+  `canonical_implies_compliant`.
 - **`Helpers.lean`**: small reusable lemmas.
-- **`Safety.lean`**: the main theorem. Two short proofs, both
+- **`Safety.lean`**: the headline theorems
+  (`focil_one_of_n_protection`, `focil_censorship_resistance`,
+  `censoring_block_not_canonical`). Three short proofs, all
   directly atop `canonical_implies_compliant`.
+- **`StakeModel.lean`**: the PoS-derived layer. Defines
+  `StakeModel` and `AttesterRun`, proves the counting
+  lemma, and supplies `AttesterRun.toForkChoice` together
+  with the end-to-end `focil_pos_derived_safety`. Discharges
+  both `ForkChoice` structural obligations from a >2/3
+  honest-validator assumption.
 
 Layering matters because each level is a _contract_ between
 the layer above and the layer below. A future refinement of
@@ -260,21 +271,22 @@ than you would have asked.
 
 To set expectations precisely:
 
-- **No model of the IL committee.** The safety theorem
-  quantifies over one specific IL, not a committee. The "1-of-N
-  honesty" claim from the EIP is _related to_ this theorem
-  (FINDINGS.md §3) but not formally captured by it.
-- **No PoS-derived `ForkChoice` instance.** The soundness
-  obligations are postulated by every concrete `ForkChoice`
-  value; the repository ships one vacuous and one toy
-  non-vacuous example. A real refinement would derive both
-  from a primitive ">2/3 honest stake" assumption. This is the
-  single largest piece of follow-on work.
-- **No execution semantics.** `CanAppend` is opaque (Section 4).
+- **The headline 1-of-N theorem captures the EIP claim, but
+  the formal `Tx` and `Block` are abstract.** The theorem
+  applies to one specific IL committee (existentially
+  quantified over committee size); the structures it
+  manipulates are minimal Lean records, not SSZ-encoded
+  containers.
+- **No execution semantics.** `CanAppend` is opaque
+  (Section 4).
 - **No timing, no gossip, no equivocator detection.** All
   three are pre-conditions on `state.stored_ils` /
   `state.equivocators`, not parts of the fork-choice rule.
   See FINDINGS.md §2.2, §2.6, §4.2.
+- **No stake weighting.** The PoS layer in
+  `Focil/StakeModel.lean` treats each validator as one stake
+  unit. A weighted variant generalises directly but is left as
+  follow-on work (see CONTRIBUTING.md §2).
 - **No cross-slot reasoning.** Single block, single slot.
 
 These are not bugs; they are the perimeter. The strength of

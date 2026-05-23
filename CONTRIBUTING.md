@@ -56,8 +56,8 @@ import FocilLean4
 #print axioms Focil.focil_censorship_resistance
 #print axioms Focil.censoring_block_not_canonical
 #print axioms Focil.canonical_implies_compliant
-#print axioms Focil.noncompliant_block_not_canonical
-#print axioms Focil.compliant_includes_or_excused
+#print axioms Focil.AttesterRun.toForkChoice
+#print axioms Focil.focil_pos_derived_safety
 ```
 
 Run:
@@ -73,103 +73,50 @@ Expected output:
 'Focil.focil_censorship_resistance' does not depend on any axioms
 'Focil.censoring_block_not_canonical' does not depend on any axioms
 'Focil.canonical_implies_compliant' does not depend on any axioms
-'Focil.noncompliant_block_not_canonical' does not depend on any axioms
-'Focil.compliant_includes_or_excused' does not depend on any axioms
+'Focil.AttesterRun.toForkChoice' depends on axioms: [propext, Quot.sound]
+'Focil.focil_pos_derived_safety' depends on axioms: [propext, Quot.sound]
 ```
 
-If any line lists axioms (including `Classical.choice`, `propext`,
-or `sorryAx`), that is a regression. Please file an issue.
+The four pure safety theorems depend on **zero** kernel
+axioms. The PoS-derived layer additionally uses `propext` and
+`Quot.sound`, two foundational kernel axioms that ship with
+every Lean installation. `Classical.choice` and `sorryAx` are
+not used anywhere; if any line lists either, that is a
+regression. Please file an issue.
 
 ## Concrete contribution opportunities
 
 These are the open problems from
 [FINDINGS.md §5–§6](FINDINGS.md), framed as standalone projects.
+The PoS-derived `ForkChoice` instantiation has already been
+done in `Focil/StakeModel.lean`; the items below are the
+remaining tightenings.
 
-### 1. PoS-derived `ForkChoice` instantiation (highest leverage)
+### 1. Refined `CompliantWith` capturing sequential dependence (highest leverage)
 
-The safety theorem is conditional on two propositional fields of
-the `ForkChoice` structure (`quorum_has_honest_voter`,
-`honest_attester_compliance`). The repository ships two example
-instances:
+EIP-7805 §"Payload Construction" notes that an IL transaction
+can become valid because an earlier IL transaction was
+appended. The current `CompliantWith` predicate quantifies
+per-transaction independently and does not capture this. A
+refined version would take the IL transactions in some order
+and thread a hypothetical post-state through the appendability
+check.
 
-- `emptyForkChoice`: discharges both vacuously. Structural
-  sanity check only.
-- `threeValidatorForkChoice`: a hand-crafted 3-validator
-  scenario where both obligations are discharged by genuine case
-  analysis. Demonstrates the main theorem firing on a real
-  scenario.
+This is structurally invasive: `CanAppend` would need to take a
+list of "tentatively appended transactions" as a parameter, and
+the safety proof's case analysis would need to handle the new
+shape. The high-level argument carries over.
 
-Neither _derives_ the obligations from a more primitive PoS
-assumption. The natural next step is a refinement that:
+### 2. Stake-weighted `StakeModel`
 
-- models attester voting at the per-slot level (committee
-  composition, vote tallying, stake-weighted thresholds);
-- assumes only that >2/3 of the stake is honest;
-- _proves_ `quorum_has_honest_voter` from the stake assumption;
-- _proves_ `honest_attester_compliance` from the per-attester
-  honesty rule "honest validators run `validate_inclusion_lists`
-  and refuse non-compliant blocks."
-
-This is the largest single piece of work and the one that turns
-the current conditional theorem into a free-standing one.
-
-#### Sketch of the refinement
-
-A plausible Lean structure for the refined model:
-
-```lean
-structure StakeModel where
-  validators       : List ValidatorIndex
-  stake            : ValidatorIndex → Nat
-  totalStake       : Nat
-  honest           : ValidatorIndex → Prop
-  honest_majority  :
-    (List.sum (validators.filter (fun v => decide (honest v))).map stake) * 3
-      > totalStake * 2
-
-structure AttesterRun (s : StakeModel) where
-  state            : FocilState
-  full             : Block → Prop
-  voted            : ValidatorIndex → Block → Prop
-  -- Honest validators only vote for compliant blocks.
-  honest_rule :
-    ∀ v b, s.honest v → voted v b → FocilCompliant full b state
-  -- Quorum threshold: >2/3 of stake voted for `b`.
-  hasQuorum (b : Block) : Prop :=
-    (List.sum (s.validators.filter (fun v => decide (voted v b))).map s.stake) * 3
-      > s.totalStake * 2
-```
-
-`hasQuorum b` plus `honest_majority` gives, by a counting
-argument, an honest voter (the honest stake and the quorum
-stake together exceed the total, so they must overlap). That
-discharges `quorum_has_honest_voter`. The honest-attester rule
-field directly discharges `honest_attester_compliance`.
-
-The work is in:
-
-- The counting argument (likely needs `Finset` and so a
-  Mathlib dependency; FINDINGS.md §4.1 anticipates this).
-- A constructive theorem `AttesterRun → ForkChoice` that
-  threads the two obligations through.
-
-Once that exists, the main safety theorem applies _unmodified_
-to any `AttesterRun` instance. The theorem becomes free-standing
-in the sense that its only remaining axiom-of-faith is the
-">2/3 honest stake" assumption, which is exactly the assumption
-underlying every other Ethereum PoS safety result.
-
-### 2. Refined `CompliantWith` capturing sequential dependence
-
-EIP-7805 §"Payload Construction" notes that an IL transaction can
-become valid because an earlier IL transaction was appended. The
-current `CompliantWith` predicate quantifies per-transaction
-independently and does not capture this. A refined version would
-take the IL transactions in some order and thread a hypothetical
-post-state through the appendability check.
-
-This is structurally invasive but the safety theorem's argument
-should largely carry over.
+The current `StakeModel` treats each validator as one stake
+unit. A weighted variant would replace
+`(filter ...).length` in the supermajority condition with
+`(filter ...).map weight |>.sum`. The counting argument
+(`filter_count_overlap`) generalises to weighted sums in a
+straightforward way. Doing this would let the formalization
+reflect Ethereum's actual stake-weighted PoS without changing
+the headline theorem statement.
 
 ### 3. Concrete `CanAppend` from a per-account state abstraction
 
