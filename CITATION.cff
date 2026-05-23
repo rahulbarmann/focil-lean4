@@ -1,0 +1,57 @@
+cff-version: 1.2.0
+message: >
+    If you use this formalization in academic work, protocol
+    research, or further verification efforts, please cite it as
+    below.
+title: "focil-lean4: A Lean 4 formalization of FOCIL (EIP-7805)"
+abstract: >
+    A Lean 4 formal model of the FOCIL censorship-resistance
+    mechanism specified in EIP-7805, with a machine-checked
+    safety theorem stating that under two precisely formulated
+    assumptions about the underlying fork-choice rule, a
+    transaction listed in a stored, non-equivocating inclusion
+    list cannot be excluded from a canonical block (modulo
+    transaction invalidity and block fullness). The safety
+    proof is sorry-free and depends on zero Lean kernel axioms.
+    The repository ships a non-vacuous concrete fork-choice
+    instance demonstrating the main theorem firing on a real
+    scenario, and an accompanying findings document recording
+    nine spec-level issues, model limitations, and abstraction
+    observations identified during the formalization.
+authors:
+    - family-names: Barman
+      given-names: Rahul
+type: software
+license: CC0-1.0
+keywords:
+    - ethereum
+    - eip-7805
+    - focil
+    - censorship-resistance
+    - formal-verification
+    - lean4
+    - consensus
+    - fork-choice
+repository-code: "https://github.com/rahulbarmann/focil-lean4"
+url: "https://github.com/rahulbarmann/focil-lean4"
+date-released: 2026-05-23
+references:
+    - type: article
+      title: "EIP-7805: Fork-choice enforced Inclusion Lists (FOCIL)"
+      authors:
+          - family-names: Thiery
+            given-names: Thomas
+          - family-names: D'Amato
+            given-names: Francesco
+          - family-names: Ma
+            given-names: Julian
+          - family-names: Monnot
+            given-names: Barnabé
+          - family-names: Tsao
+            given-names: Terence
+          - family-names: Kaufmann
+            given-names: Jacob
+          - family-names: Song
+            given-names: Jihoon
+      url: "https://eips.ethereum.org/EIPS/eip-7805"
+      year: 2024
