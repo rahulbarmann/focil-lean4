@@ -28,37 +28,58 @@ FORMALIZATION` (the formalization handles it directly).
 
 ## Executive summary
 
-For a reader with five minutes:
+For a reader with five minutes, two of the items below are
+substantive observations the formalization surfaced; the rest
+are spec-hygiene issues and disclosed model limitations.
 
-- **§1.3, `MAX_TRANSACTIONS_PER_INCLUSION_LIST = 1`** is a
-  placeholder in `beacon-chain.md` that, taken at face value, would
-  reduce each IL to a single transaction. This is inconsistent with
-  the 8 KiB per-IL byte cap in EIP-7805. The number needs to be
-  resolved before the spec stabilises.
+### Substantive observations
+
+- **§2.7, The honest-attester invariant in EIP-7805 admits two
+  non-equivalent formal readings, and the natural one is
+  unsatisfiable.** Reading "honest attesters refuse to vote for
+  non-compliant blocks" globally (across all stores) versus
+  locally (against the attester's own store) yields formally
+  different propositions. The global reading cannot be
+  discharged non-vacuously when EVM validity is opaque. The
+  spec is correct under the local reading, but informal
+  arguments that compose the rule across attesters with
+  different stores have a hidden quantifier-scope assumption.
+
+- **§2.4, Equivocation is a free censorship channel for any
+  transaction listed by only one IL committee member.** A
+  Byzantine member can void their own contribution by signing
+  two distinct ILs. The EIP's existing equivocation handling
+  (ignoring further ILs from a known equivocator) is correct
+  fork-choice safety, but it degrades the "1-of-N honesty"
+  guarantee to "1-of-(N − equivocators)" for any transaction
+  listed only by an equivocating member. The EIP addresses
+  equivocation at the bandwidth level only. Demonstrated by
+  example in `Tests/Examples.lean` Scenarios 9–10.
+
+### Spec-hygiene issues
+
+- **§1.3, `MAX_TRANSACTIONS_PER_INCLUSION_LIST = 1`** is
+  marked `# TODO: Placeholder` in `beacon-chain.md` and
+  contradicts the 8 KiB per-IL byte cap quoted by the EIP body.
 - **§2.1, `validate_inclusion_lists` has no body** in
-  `fork-choice.md` (literally `...`). The only normative description
-  is a one-sentence docstring that leaves three substantive
-  questions unanswered (ordering, fullness semantics, deduplication).
-- **§2.4, Equivocation is a free censorship channel.** A single
-  Byzantine IL committee member can void their own contribution by
-  publishing two ILs, removing protection for any transaction listed
-  only by them. The EIP addresses equivocation only at the
-  bandwidth level.
-- **§2.5, The Lean `CompliantWith` predicate does not capture
-  sequential dependence between IL transactions** (see EIP-7805
-  §"Payload Construction"). This is a disclosed model limitation,
-  not a spec gap.
-- **§2.7, The honest-attester invariant must be relativized to
-  the attester's local store.** An earlier draft of `ForkChoice`
-  universally quantified the soundness obligation
-  `honest_attester_compliance` over all stores, which (combined
-  with `CanAppend` opaque) made the obligation impossible to
-  discharge non-vacuously. The current `ForkChoice` bundles the
-  store and fullness predicate as fields, matching what an
-  honest attester actually does. This change is also necessary
-  for the formalization to admit a non-vacuous concrete instance
-  (which it now does; see `Tests/Examples.lean`'s
-  `threeValidatorForkChoice`).
+  `fork-choice.md` (literally `...`). The only normative
+  description is a one-sentence docstring that leaves three
+  substantive questions open (ordering, fullness semantics,
+  deduplication).
+- **§1.2, `parent_hash` and `parent_root`** are referenced in
+  `validator.md` but are not fields of the `InclusionList`
+  container in `beacon-chain.md`.
+
+### Disclosed model limitations
+
+- **§2.5**, sequential dependence between IL transactions is
+  not captured by the current `CompliantWith` predicate.
+- **§2.6**, equivocator detection (`on_inclusion_list`) is not
+  modelled; `state.equivocators` is taken as input.
+
+The remaining items in §1 and §2 are smaller observations
+useful as cross-references but not load-bearing for the safety
+argument.
 
 ---
 
@@ -415,32 +436,57 @@ between IL-construction and fork-choice enforcement).
 **Verification status:** CONFIRMED AGAINST SPEC.
 **Engagement:** RESOLVED IN FORMALIZATION.
 
-This finding emerged when we attempted to construct a non-vacuous
-instance of `ForkChoice`.
+EIP-7805's fork-choice changes specify, in English, that
+"attesters only vote for the proposer's block if it includes
+transactions from all stored ILs." The natural informal reading
+of this rule, paraphrased: _honest attesters refuse to vote for
+FOCIL-non-compliant blocks_.
 
-An earlier draft of the abstraction wrote the
-`honest_attester_compliance` obligation in a universally
-state-quantified form:
+This informal statement is ambiguous in a way that becomes
+visible only when one tries to write it as a formal predicate.
+Compliance is defined relative to a fork-choice store (the set
+of stored ILs determines what the block is being measured
+against). So the informal rule has two readings:
 
-```lean
-honest_attester_compliance :
-    ∀ (full : Block → Prop) (b : Block) (state : FocilState)
-      (v : ValidatorIndex),
-      IsHonest v → Voted v b →
-      FocilCompliant full b state
-```
+1. **Globally quantified.** _For every conceivable fork-choice
+   store, honest attesters who voted for `b` make `b` compliant
+   against that store._
+2. **Locally relativized.** _Honest attesters who voted for `b`
+   make `b` compliant against the fork-choice store they
+   themselves observed at attestation time._
 
-That signature requires that an honest validator who voted for `b`
-make `b` compliant against _every_ conceivable store, not just the
-store the validator observed at attestation time. With `CanAppend`
-opaque (§4.3), there is no concrete `(b, state)` pair where
-non-vacuous compliance can be proved against an arbitrary state:
-pick any `tx` not in `b` and a state whose only stored IL contains
-`tx`, and the disjunction `tx ∈ b.transactions ∨ ¬ CanAppend tx b
-∨ full b` cannot be discharged.
+These readings are not equivalent. Reading (1) is strictly
+stronger and is what a careful formalization would write down
+first, since it does not require any auxiliary notion of
+"the store the attester observed."
 
-The fix is to bundle `state` and `full` as fields of `ForkChoice`,
-making it the per-attester context. The corrected obligation reads:
+**Reading (1) is unsatisfiable non-vacuously.** Once `CanAppend`
+is opaque (§4.3), there is no concrete `(b, attester)` pair
+where a non-vacuous proof of (1) is possible. To see this: pick
+any transaction `tx` not in `b.transactions`, and consider the
+adversarial store whose only stored IL contains `tx`. The
+compliance obligation for that store reduces to
+`tx ∈ b.transactions ∨ ¬ CanAppend tx b ∨ full b`, none of
+whose disjuncts is discharge-able for an arbitrary `b`. The
+only escape is to make the antecedent (the attester's vote)
+unsatisfiable, which empties the rule of content.
+
+**Implication for the spec.** The informal English sentence is
+sensible only under reading (2). Any informal argument that
+implicitly invokes reading (1), for instance by composing
+"honest attesters refuse non-compliant blocks" across attesters
+with different fork-choice store snapshots, is over-claiming.
+This does not affect the EIP's safety claim _as the EIP states
+it_ (under reading (2), which is what real attesters actually
+do). It does mean that any informal proof sketch that treats
+the rule as a single global invariant has a hidden assumption
+about which store is being referred to.
+
+**How the formalization captures this.** The `ForkChoice`
+structure in `Focil/ForkChoice.lean` bundles the attester's
+store snapshot (`state`) and fullness model (`full`) as
+_fields_, fixing reading (2) at the type level. The soundness
+obligation reads:
 
 ```lean
 honest_attester_compliance :
@@ -449,25 +495,28 @@ honest_attester_compliance :
       FocilCompliant full b state
 ```
 
-where `state` and `full` are now structure fields. This matches
-what an honest attester actually does in real LMD-GHOST: they vote
-relative to _their_ fork-choice store snapshot at attestation
-time, not relative to all conceivable snapshots.
+where `state` and `full` are the structure's own fields. An
+attester is, in this formalization, _defined by_ the store they
+observed. Cross-attester reasoning (e.g., counting honest votes
+across validators with different stores) becomes impossible to
+state at this level of abstraction without explicit
+quantification.
 
-**Why this is a finding, not just a refactor.** The original
-signature is the one a researcher reading EIP-7805 might write
-down naively, treating "honest attesters refuse to vote for
-non-compliant blocks" as a single global invariant. The
-formalization reveals that this invariant is only sensible
-relative to a specific store snapshot, and any spec text or
-informal argument that conflates the two is over-claiming. This
-is the sort of subtle assumption a Lean formalization is
-specifically good at surfacing.
+**Why this is a finding rather than a refactor.** The naive
+formalization that takes reading (1) does not type-check against
+any non-trivial concrete fork-choice rule. A researcher who
+writes down the natural English-prose obligation in Lean and
+then attempts to provide a witness instance is forced to
+discover this. The formalization makes precise a subtle
+implicit assumption in the spec text, which is one of the
+primary reasons to do this kind of work. See the `ForkChoice`
+docstring in `Focil/ForkChoice.lean` for the in-source
+explanation of the design choice.
 
-The corrected formalization in `Focil/ForkChoice.lean` admits a
-non-vacuous concrete instance, `threeValidatorForkChoice` in
-`Tests/Examples.lean`, which Scenarios 6–8 use to fire the main
-theorem on a real (if small) scenario.
+The corrected formalization admits a non-vacuous concrete
+instance, `threeValidatorForkChoice` in `Tests/Examples.lean`,
+which Scenarios 6–8 and 11 use to fire the safety theorems on a
+real (if small) scenario.
 
 ---
 
@@ -667,42 +716,46 @@ The contribution of this repository is:
    compliance rule, faithful to `consensus-specs` `eip7805/`
    modulo the simplifications disclosed in §2.5, §2.6, §4.1–§4.3,
    and §6.
-2. A **type-checked** main theorem,
-   `Focil.focil_censorship_resistance`, that states censorship
-   resistance precisely.
-3. A **completed proof** of that theorem given the abstract
+2. A **type-checked** headline theorem,
+   `Focil.focil_one_of_n_protection`, that states FOCIL's 1-of-N
+   censorship-resistance guarantee precisely: it suffices that
+   _at least one_ non-equivocating IL committee member listed
+   the transaction for it to be force-included in any canonical
+   block (modulo invalidity and block fullness). The witness IL
+   is existentially quantified.
+3. A **per-IL building block**, `Focil.focil_censorship_resistance`,
+   which takes the witness IL as an explicit parameter. The
+   headline theorem is a thin corollary.
+4. A **completed proof** of both theorems given the abstract
    `CanAppend` opaque definition and the two `ForkChoice`
-   structural obligations stated in §5. No `sorry` in the safety
-   proof. The Lean kernel confirms (via `#print axioms`) that the
-   proof depends on **zero kernel axioms**, not even
-   `Classical.choice` or `propext`. This is true _modulo_ the
-   `ForkChoice` obligations being supplied by the consumer.
-4. A **completed proof** of the contrapositive corollary,
+   structural obligations stated in §5. No `sorry`. The Lean
+   kernel confirms (via `#print axioms`) that the proofs depend
+   on **zero kernel axioms**, not even `Classical.choice` or
+   `propext`. This is true _modulo_ the `ForkChoice` obligations
+   being supplied by the consumer.
+5. A **completed proof** of the contrapositive corollary,
    `Focil.censoring_block_not_canonical`, useful as a
    builder-side incentive statement.
-5. A **non-vacuous concrete instance**
-   (`threeValidatorForkChoice`) demonstrating the main theorem
+6. A **non-vacuous concrete instance**
+   (`threeValidatorForkChoice`) demonstrating both theorems
    firing on a real (if small) scenario. Building this instance
    surfaced finding §2.7: the honest-attester invariant must be
    relativized to the attester's local store, not universally
    quantified.
-6. This `FINDINGS.md`, with **nine items** spanning four
-   spec discrepancies (§1.1–§1.4), three open spec questions
-   (§2.1, §2.2, §2.3), one censorship-channel observation
-   (§2.4), two disclosed model limitations (§2.5, §2.6), and
-   one abstraction-level discovery surfaced by the
-   formalization (§2.7).
+7. This `FINDINGS.md`, with **two substantive observations**
+   (§2.4 and §2.7) that the formalization surfaced, plus
+   spec-hygiene issues (§1.2, §1.3, §2.1) and disclosed model
+   limitations (§2.5, §2.6). Smaller cross-references in §1.1,
+   §1.4, §2.2, and §2.3 round out the document.
 
-What the safety theorem does **not** prove:
+What the safety theorems do **not** prove:
 
-- It does not derive censorship resistance from PoS first
+- They do not derive censorship resistance from PoS first
   principles. The two `ForkChoice` obligations are postulated.
-- It does not prove correctness against a real EVM. `CanAppend`
-  is opaque.
-- It does not prove correctness in the presence of sequential
+- They do not prove correctness against a real EVM.
+  `CanAppend` is opaque.
+- They do not prove correctness in the presence of sequential
   validity dependence between IL transactions (§2.5).
-- It does not prove anything about the IL committee as a whole.
-  It quantifies over one specific IL.
 
 These are the natural seams along which the formalisation should
 grow. Each is a concrete invitation for follow-on work; see

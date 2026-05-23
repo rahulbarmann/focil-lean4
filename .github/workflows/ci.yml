@@ -42,6 +42,7 @@ jobs:
                   cat > AuditAxioms.lean <<'EOF'
                   import FocilLean4
 
+                  #print axioms Focil.focil_one_of_n_protection
                   #print axioms Focil.focil_censorship_resistance
                   #print axioms Focil.censoring_block_not_canonical
                   #print axioms Focil.canonical_implies_compliant
@@ -56,10 +57,10 @@ jobs:
                     echo "::error::A safety theorem depends on a kernel axiom."
                     exit 1
                   fi
-                  # Sanity: ensure all five lines are present.
+                  # Sanity: ensure all six lines are present.
                   COUNT=$(echo "$OUTPUT" | grep -c "does not depend on any axioms")
-                  if [ "$COUNT" -ne 5 ]; then
-                    echo "::error::Expected 5 axiom-free theorems, found $COUNT."
+                  if [ "$COUNT" -ne 6 ]; then
+                    echo "::error::Expected 6 axiom-free theorems, found $COUNT."
                     exit 1
                   fi
                   rm AuditAxioms.lean

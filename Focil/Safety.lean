@@ -1,24 +1,31 @@
 /-
   Focil/Safety.lean
 
-  The main safety theorem of FOCIL: censorship resistance.
+  The safety theorems of FOCIL: censorship resistance.
 
-  Statement, in plain English:
+  This file states FOCIL's safety claim at two levels of generality.
 
-  > Fix any `ForkChoice` value (which bundles a fork-choice store
-  > snapshot, a block-fullness model, and the two soundness
-  > obligations on attester voting). For any block, any inclusion
-  > list containing a transaction: if the inclusion list is in
-  > the bundled store, its author is not in the equivocator set,
-  > the transaction could be validly appended to the block, the
-  > block is not full, and the block is the canonical chain head,
-  > then the transaction must be in the block.
+  - `focil_one_of_n_protection` is the **headline theorem**: it
+    matches the 1-of-N honesty claim that EIP-7805 actually makes.
+    Read: if any non-equivocating IL in the fork-choice store
+    contains an appendable transaction `tx`, and the candidate
+    block is canonical and not full, then `tx` is in the block.
+    The witness IL is existentially quantified, so the theorem
+    fires whenever *at least one* honest committee member listed
+    `tx`.
 
-  Argument:
+  - `focil_censorship_resistance` is the per-IL building block.
+    It takes the witness IL as an explicit parameter. The 1-of-N
+    headline theorem is a thin corollary of this one.
+
+  - `censoring_block_not_canonical` is the builder-side
+    contrapositive of `focil_censorship_resistance`.
+
+  Argument structure (shared by both forward theorems):
 
   1. Canonicality forces compliance against `fc`'s bundled
      context (`canonical_implies_compliant`).
-  2. Compliance applied to the specific (IL, tx) pair gives a
+  2. Compliance applied to the witness (IL, tx) pair gives a
      three-way disjunction: the transaction is included, or it
      cannot be appended, or the block is full.
   3. The latter two are excluded by hypothesis. Only inclusion
@@ -26,10 +33,11 @@
 
   Caveats and disclosures (FINDINGS.md §7):
 
-  - The theorem is conditional on the two soundness obligations
-    of `ForkChoice` being supplied by the consumer. It does not
-    derive censorship resistance from PoS first principles.
-  - It is also conditional on a faithful realisation of
+  - Both theorems are conditional on the two soundness
+    obligations of `ForkChoice` being supplied by the consumer.
+    They do not derive censorship resistance from PoS first
+    principles.
+  - They are also conditional on a faithful realisation of
     `CanAppend` (FINDINGS.md §4.3) and on `state.stored_ils` /
     `state.equivocators` being correctly populated by an honest
     execution of `on_inclusion_list` (§2.6).
@@ -45,15 +53,20 @@ import Focil.Helpers
 namespace Focil
 
 -- =========================================================================
--- The main safety theorem
+-- Per-IL building block
 -- =========================================================================
 
 /--
-  **FOCIL censorship resistance (main theorem).**
+  **Per-IL censorship resistance.**
+
+  Building block for the headline 1-of-N theorem
+  (`focil_one_of_n_protection` below). Given an *explicit*
+  witness IL, this theorem says the transaction must be in the
+  canonical block.
 
   Hypotheses:
 
-  - `h_tx_in_il`:        `tx` is in some inclusion list `il`.
+  - `h_tx_in_il`:        `tx` is in inclusion list `il`.
   - `h_il_stored`:       `il` is in `fc.state.stored_ils`.
   - `h_il_considered`:   `il`'s author is not in
                          `fc.state.equivocators` (so attesters
@@ -66,8 +79,7 @@ namespace Focil
 
   Conclusion: `tx ∈ b.transactions`.
 
-  See the file-level comment for caveats. In particular, the
-  hypothesis `h_il_considered` is "not yet observed equivocating,"
+  Note: `h_il_considered` is "not yet observed equivocating,"
   not "honest in the colloquial sense" (FINDINGS.md §2.4).
 -/
 theorem focil_censorship_resistance
@@ -103,6 +115,65 @@ theorem focil_censorship_resistance
       exact (h_block_not_full h_full).elim
 
 -- =========================================================================
+-- Headline theorem: FOCIL's 1-of-N censorship-resistance guarantee
+-- =========================================================================
+
+/--
+  **FOCIL's 1-of-N censorship-resistance guarantee.**
+
+  This is the formal counterpart of EIP-7805's marquee claim:
+  it suffices that *at least one* non-equivocating IL committee
+  member listed the transaction for it to be force-included in
+  any canonical block (modulo invalidity and block fullness).
+
+  The witness IL is existentially quantified inside
+  `h_listed_by_some_honest_member`: the theorem fires whenever
+  the fork-choice store contains *some* non-equivocating IL
+  carrying `tx`. The other ILs in the store are irrelevant; an
+  adversary controlling some committee seats and equivocating
+  the rest does not defeat the guarantee, as long as at least
+  one seat publishes a non-equivocating IL containing `tx`.
+
+  Hypotheses:
+
+  - `h_listed_by_some_honest_member`:
+                         there exists a stored, non-equivocating
+                         IL `il` with `tx ∈ il.transactions`.
+  - `h_can_append`:      `tx` could be validly appended to `b`.
+  - `h_block_not_full`:  `b` does not satisfy `fc.full`.
+  - `h_canonical`:       `b` is the canonical chain head.
+
+  Conclusion: `tx ∈ b.transactions`.
+
+  Caveats:
+
+  - "Honest member" here means "not in the equivocator set,"
+    which captures the 1-of-N guarantee as the EIP states it.
+    A Byzantine member who has not yet been caught equivocating
+    still satisfies the precondition; the guarantee degrades to
+    "1-of-(N − equivocators)" once equivocators have been
+    detected. See FINDINGS.md §2.4 and `Tests/Examples.lean`
+    Scenarios 9–10 for concrete demonstrations.
+  - All caveats from `focil_censorship_resistance` apply.
+-/
+theorem focil_one_of_n_protection
+    (fc : ForkChoice) (b : Block) (tx : Transaction)
+    (h_listed_by_some_honest_member :
+      ∃ il, il ∈ fc.state.stored_ils
+            ∧ IsConsidered fc.state il
+            ∧ tx ∈ il.transactions)
+    (h_can_append    : CanAppend tx b)
+    (h_block_not_full: ¬ fc.full b)
+    (h_canonical     : IsCanonical fc b) :
+    tx ∈ b.transactions := by
+  -- Unpack the witness IL and discharge the per-IL theorem.
+  obtain ⟨il, h_il_stored, h_il_considered, h_tx_in_il⟩ :=
+    h_listed_by_some_honest_member
+  exact focil_censorship_resistance fc b il tx
+    h_tx_in_il h_il_stored h_il_considered
+    h_can_append h_block_not_full h_canonical
+
+-- =========================================================================
 -- Builder-side contrapositive
 -- =========================================================================
 
@@ -127,7 +198,7 @@ theorem censoring_block_not_canonical
     (h_tx_excluded   : tx ∉ b.transactions) :
     ¬ IsCanonical fc b := by
   intro h_canonical
-  -- If the block were canonical the main theorem would force
+  -- If the block were canonical the per-IL theorem would force
   -- `tx ∈ b.transactions`, contradicting `h_tx_excluded`.
   exact h_tx_excluded
     (focil_censorship_resistance fc b il tx

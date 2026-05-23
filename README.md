@@ -34,26 +34,38 @@ dependencies.
 
 ## What is proven
 
-**Main theorem** (`Focil.focil_censorship_resistance`, in
+**Headline theorem** (`Focil.focil_one_of_n_protection`, in
 [`Focil/Safety.lean`](Focil/Safety.lean)):
 
 > Fix any `ForkChoice` value `fc` (which bundles a fork-choice
 > store snapshot, a block-fullness model, and two soundness
-> obligations on attester voting; see below). For any block `b`
-> and any inclusion list `il` containing a transaction `tx`: if
+> obligations on attester voting; see below). For any block
+> `b` and transaction `tx`: if
 >
-> - `il` is in `fc.state.stored_ils`,
-> - the author of `il` is not in `fc.state.equivocators`,
+> - some inclusion list in `fc.state.stored_ils` whose author
+>   is not in `fc.state.equivocators` contains `tx`,
 > - `tx` could be validly appended to `b` (`CanAppend tx b`),
 > - `b` is not full under `fc.full`,
 > - and `b` is the canonical chain head under `fc`,
 >
 > then `tx ∈ b.transactions`.
 
-A direct corollary (`Focil.censoring_block_not_canonical`) is
-the builder-side contrapositive: a block that omits an
-"appendable, listed, non-equivocating, room-available"
-transaction cannot become canonical.
+This is the formal counterpart of EIP-7805's marquee 1-of-N
+honesty claim: it suffices that _at least one_ non-equivocating
+IL committee member listed `tx` for `tx` to be force-included
+in any canonical block (modulo invalidity and block fullness).
+
+The witness IL is existentially quantified, so adversaries
+controlling some committee seats and equivocating others do not
+defeat the guarantee, as long as at least one seat publishes a
+non-equivocating IL containing `tx`.
+
+The headline theorem is a thin corollary of a per-IL building
+block, `Focil.focil_censorship_resistance`, which takes the
+witness IL as an explicit parameter. A direct contrapositive,
+`Focil.censoring_block_not_canonical`, says that a block
+omitting such a `tx` cannot become canonical: the form a
+builder reasoning about block construction cares about.
 
 **The proof depends on:**
 
@@ -79,14 +91,17 @@ transaction cannot become canonical.
       false. Structural sanity check only.
     - `Tests.Examples.threeValidatorForkChoice` is a
       non-vacuous 3-validator scenario where both obligations
-      are discharged by genuine case analysis. The main theorem
-      fires against this instance in
-      [Scenarios 6–8 of `Tests/Examples.lean`](Tests/Examples.lean).
+      are discharged by genuine case analysis. The headline
+      theorem fires against this instance in
+      [Scenario 11 of `Tests/Examples.lean`](Tests/Examples.lean).
+      Scenarios 6–10 cover the per-IL building block, the
+      builder-side contrapositive, and the equivocator
+      degradation case.
 
     A `ForkChoice` instance derived from a refined LMD-GHOST
     model (where the soundness obligations are _proven_ from a
     primitive ">2/3 honest stake" assumption rather than
-    postulated) remains the largest piece of follow-on work. See
+    postulated) is the next milestone for this project; see
     [FINDINGS.md §5](FINDINGS.md#5-where-the-formalization-is-conditional)
     and the sketch in
     [`CONTRIBUTING.md`](CONTRIBUTING.md#1-pos-derived-forkchoice-instantiation-highest-leverage).
@@ -153,7 +168,7 @@ focil-lean4/
 │   ├── Helpers.lean             # small reusable lemmas
 │   └── Safety.lean              # main theorem and corollary
 ├── Tests/
-│   └── Examples.lean            # 10 worked scenarios; concrete ForkChoice instances
+│   └── Examples.lean            # 11 worked scenarios; concrete ForkChoice instances
 └── .github/
     ├── workflows/ci.yml         # CI: build, type-check, axiom audit
     └── ISSUE_TEMPLATE/          # issue and PR templates
@@ -186,10 +201,11 @@ suggested order:
 6. **[`Focil/Safety.lean`](Focil/Safety.lean)**: the main
    theorem. The proof is short because the conceptual work
    happened in the previous files.
-7. **[`Tests/Examples.lean`](Tests/Examples.lean)**: ten
-   concrete scenarios, including
-   `threeValidatorForkChoice` and the equivocator
-   degradation demo (Scenarios 9–10).
+7. **[`Tests/Examples.lean`](Tests/Examples.lean)**: eleven
+   concrete scenarios. Scenario 11 fires the headline 1-of-N
+   theorem; Scenarios 6–8 fire the per-IL building block and
+   its contrapositive; Scenarios 9–10 demonstrate the
+   equivocator degradation.
 8. **[`FINDINGS.md`](FINDINGS.md)**: the research log; nine
    items spanning spec gaps, model limits, and the
    abstraction-level discovery (§2.7) that emerged from
@@ -207,6 +223,7 @@ file:
 ```lean
 import FocilLean4
 
+#print axioms Focil.focil_one_of_n_protection
 #print axioms Focil.focil_censorship_resistance
 #print axioms Focil.censoring_block_not_canonical
 #print axioms Focil.canonical_implies_compliant
@@ -221,6 +238,7 @@ lake env lean YourFile.lean
 You should see:
 
 ```
+'Focil.focil_one_of_n_protection' does not depend on any axioms
 'Focil.focil_censorship_resistance' does not depend on any axioms
 'Focil.censoring_block_not_canonical' does not depend on any axioms
 'Focil.canonical_implies_compliant' does not depend on any axioms
@@ -244,55 +262,62 @@ on the fork-choice rule itself. See
 
 ## Spec findings
 
-The audit produced six categories of spec-level finding plus
-one abstraction-level discovery surfaced by the formalization
-itself, and two disclosed model limitations the formalization
-imposes. Headlines:
+Two of the items the formalization surfaced are substantive
+research observations; the rest are spec-hygiene issues and
+disclosed model limitations.
 
-- **`MAX_TRANSACTIONS_PER_INCLUSION_LIST = 1`** is a
-  placeholder in `beacon-chain.md` that contradicts the 8 KiB
-  byte cap from the EIP body.
+**Substantive observations:**
+
+- **The honest-attester invariant in EIP-7805 admits two
+  non-equivalent formal readings, and the natural one is
+  unsatisfiable.** The English-prose rule "honest attesters
+  refuse to vote for non-compliant blocks" can be read globally
+  (across all stores) or locally (against the attester's own
+  store). The global reading cannot be discharged non-vacuously
+  when EVM validity is opaque. The spec is correct under the
+  local reading; informal arguments that compose the rule
+  across attesters with different stores have a hidden
+  quantifier-scope assumption.
+  ([§2.7](FINDINGS.md#27-the-honest-attester-invariant-must-be-relativized-to-the-attesters-store))
+
+- **Equivocation is a free censorship channel for any
+  transaction listed by only one IL committee member.** A
+  Byzantine member can void their own contribution by signing
+  two distinct ILs. The EIP's existing equivocation handling
+  is correct fork-choice safety, but it degrades the "1-of-N
+  honesty" guarantee to "1-of-(N − equivocators)" for any
+  transaction listed only by an equivocating member. The EIP
+  addresses equivocation at the bandwidth level only.
+  Demonstrated by example in `Tests/Examples.lean` Scenarios
+  9–10.
+  ([§2.4](FINDINGS.md#24-equivocation-as-a-censorship-channel))
+
+**Spec-hygiene issues:**
+
+- **`MAX_TRANSACTIONS_PER_INCLUSION_LIST = 1`** is marked
+  `# TODO: Placeholder` in `beacon-chain.md` and contradicts
+  the 8 KiB per-IL byte cap quoted by the EIP body.
   ([§1.3](FINDINGS.md#13-max_transactions_per_inclusion_list--1-placeholder))
 - **`validate_inclusion_lists` has no body**: only a
   one-sentence docstring that leaves three substantive
   questions open.
   ([§2.1](FINDINGS.md#21-validate_inclusion_lists-is--unimplemented))
-- **Equivocation is a free censorship channel.** A Byzantine
-  IL committee member can void their own contribution by
-  publishing two ILs.
-  ([§2.4](FINDINGS.md#24-equivocation-as-a-censorship-channel),
-  demonstrated by example in `Tests/Examples.lean` Scenarios
-  9–10.)
-- **Adversarial validity changes**: a colluding party can
-  manufacture invalidity for an IL transaction right before
-  block production.
-  ([§2.3](FINDINGS.md#23-adversarial-validity-changes))
 - **`parent_hash`/`parent_root`** referenced in `validator.md`
-  are not on the `InclusionList` container in
+  are not fields of the `InclusionList` container in
   `beacon-chain.md`.
   ([§1.2](FINDINGS.md#12-parent_hash--parent_root-on-inclusionlist))
-- **8 s vs 9 s timing**: the EIP prose says 8 s; the constant
-  is 9 s.
-  ([§1.4](FINDINGS.md#14-view-freeze-deadline-8-s-vs-9-s))
-- **Honest-attester compliance must be relativized to the
-  attester's store.** This emerged from an attempt to build a
-  non-vacuous `ForkChoice` instance: the universally
-  state-quantified form of the obligation is unsatisfiable
-  non-vacuously when `CanAppend` is opaque. The fix bundles
-  `state` and `full` as fields of `ForkChoice`, matching what
-  an honest attester actually does in real LMD-GHOST.
-  ([§2.7](FINDINGS.md#27-the-honest-attester-invariant-must-be-relativized-to-the-attesters-store))
 
-Plus two disclosed model limitations:
+**Disclosed model limitations:**
 
-- **Sequential dependence between IL transactions** is not
-  captured by `CompliantWith`.
-  ([§2.5](FINDINGS.md#25-sequential-dependence-in-the-compliance-check-model-limitation))
-- **Equivocator detection** is not modelled;
-  `state.equivocators` is taken as input.
-  ([§2.6](FINDINGS.md#26-equivocator-detection-is-not-modelled-model-limitation))
+- Sequential dependence between IL transactions is not
+  captured by `CompliantWith`
+  ([§2.5](FINDINGS.md#25-sequential-dependence-in-the-compliance-check-model-limitation)).
+- Equivocator detection is not modelled; `state.equivocators`
+  is taken as input
+  ([§2.6](FINDINGS.md#26-equivocator-detection-is-not-modelled-model-limitation)).
 
-Read the full discussion in [FINDINGS.md](FINDINGS.md).
+Plus smaller cross-references and threat-model notes; see
+[FINDINGS.md](FINDINGS.md) for the full discussion.
 
 ---
 
@@ -331,28 +356,39 @@ References:
 
 ## Contributing and follow-on work
 
-The natural next steps, ordered roughly by leverage:
+This repository is the first part of a planned two-part
+research programme. The headline 1-of-N safety theorem proven
+here is conditional on two propositional obligations of the
+underlying fork-choice rule (see "What is proven" above). The
+next milestone is to discharge those obligations from a more
+primitive PoS assumption.
 
-1. **PoS-derived `ForkChoice` instantiation.** The current
-   non-vacuous instance `threeValidatorForkChoice` is
-   hand-crafted. A real refinement would model attester
-   voting at the per-slot level (committee composition,
-   vote tallying, attester honesty) and _derive_ the two
-   soundness conditions from a primitive ">2/3 honest stake"
-   assumption. Sketch in
-   [CONTRIBUTING.md §1](CONTRIBUTING.md#1-pos-derived-forkchoice-instantiation-highest-leverage).
-2. **Refined `CompliantWith`** that handles sequential
+**Active milestone, PoS-derived `ForkChoice` instantiation
+(target: 4–6 weeks from initial release).** The current
+non-vacuous instance `threeValidatorForkChoice` is hand-crafted.
+A real refinement would model attester voting at the per-slot
+level (committee composition, vote tallying, attester honesty)
+and _derive_ the two soundness conditions from a primitive
+">2/3 honest stake" assumption. The headline theorem then
+becomes free-standing: its only remaining axiom-of-faith is the
+same >2/3 honest stake assumption that underlies every other
+Ethereum PoS safety result. A Lean structure sketch is in
+[CONTRIBUTING.md §1](CONTRIBUTING.md#1-pos-derived-forkchoice-instantiation-highest-leverage).
+
+**Other contribution opportunities, ordered by leverage:**
+
+1. **Refined `CompliantWith`** that handles sequential
    validity dependence between IL transactions.
    ([FINDINGS.md §2.5](FINDINGS.md#25-sequential-dependence-in-the-compliance-check-model-limitation))
-3. **Concrete `CanAppend`** built from a per-account
+2. **Concrete `CanAppend`** built from a per-account
    nonce/balance abstraction, enabling proofs about
    adversarial validity changes.
    ([FINDINGS.md §2.3](FINDINGS.md#23-adversarial-validity-changes))
-4. **Equivocator-detection model.** Formalize
+3. **Equivocator-detection model.** Formalize
    `on_inclusion_list` and prove that a faithful execution
    correctly populates `state.equivocators`.
    ([FINDINGS.md §2.6](FINDINGS.md#26-equivocator-detection-is-not-modelled-model-limitation))
-5. **IL gossip / network model.** Formalize the threat
+4. **IL gossip / network model.** Formalize the threat
    surface for network-level adversaries.
    ([FINDINGS.md §2.2](FINDINGS.md#22-network-adversary-against-il-propagation))
 

@@ -28,6 +28,9 @@
     FINDINGS.md §2.4 by example. When an IL author is in the
     equivocator set, the inclusion guarantee for transactions
     listed only by them is intentionally voided.
+  - **Headline 1-of-N theorem** (Scenario 11): fires
+    `focil_one_of_n_protection` against the 3-validator
+    instance, with the witness IL produced existentially.
 -/
 
 import FocilLean4
@@ -533,6 +536,58 @@ example : ¬ IsConsidered stateWithEquivocator ilHonest := by
   -- membership holds and the negation is false.
   simp [IsConsidered, IsHonestlyAttributed, stateWithEquivocator,
         ilHonest]
+
+-- =========================================================================
+-- The 1-of-N headline theorem firing on a concrete witness
+-- =========================================================================
+
+/--
+  **Scenario 11: the headline 1-of-N theorem firing.**
+
+  Whereas Scenario 7 fires the per-IL building block
+  (`focil_censorship_resistance`) by passing `ilHonest`
+  explicitly, this scenario fires the headline theorem
+  `focil_one_of_n_protection`. The witness IL is *existentially*
+  produced inside the hypothesis, matching how the theorem
+  would be used in practice: the consumer asserts that *some*
+  honest committee member listed `tx`, without naming which.
+
+  This is what EIP-7805's marquee 1-of-N claim looks like in
+  formal form. Adversaries controlling some committee seats and
+  equivocating others do not defeat the guarantee, as long as at
+  least one seat publishes a non-equivocating IL containing
+  `tx`.
+-/
+example
+    (h_can_append : CanAppend tx1 blockIncludes) :
+    tx1 ∈ blockIncludes.transactions := by
+  -- Build the existential witness: at least one stored,
+  -- non-equivocating IL contains `tx1`.
+  have h_witness :
+      ∃ il, il ∈ threeValidatorForkChoice.state.stored_ils
+            ∧ IsConsidered threeValidatorForkChoice.state il
+            ∧ tx1 ∈ il.transactions := by
+    refine ⟨ilHonest, ?_, ?_, ?_⟩
+    · -- ilHonest ∈ stored_ils
+      simp [threeValidatorForkChoice, stateHonest]
+    · -- ilHonest is considered (author not in equivocators)
+      simp [threeValidatorForkChoice, IsConsidered,
+            IsHonestlyAttributed, stateHonest]
+    · -- tx1 ∈ ilHonest.transactions
+      simp [ilHonest]
+  -- Block-not-full and canonical hypotheses, as before.
+  have h_block_not_full :
+      ¬ threeValidatorForkChoice.full blockIncludes := by
+    intro h
+    exact h
+  have h_canonical :
+      IsCanonical threeValidatorForkChoice blockIncludes := by
+    show hasQuorum3v blockIncludes
+    rfl
+  -- Apply the headline theorem.
+  exact focil_one_of_n_protection
+    threeValidatorForkChoice blockIncludes tx1
+    h_witness h_can_append h_block_not_full h_canonical
 
 end Examples
 end Focil

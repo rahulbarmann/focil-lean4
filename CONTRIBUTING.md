@@ -52,6 +52,7 @@ Create a file `AuditAxioms.lean` at the repository root with:
 ```lean
 import FocilLean4
 
+#print axioms Focil.focil_one_of_n_protection
 #print axioms Focil.focil_censorship_resistance
 #print axioms Focil.censoring_block_not_canonical
 #print axioms Focil.canonical_implies_compliant
@@ -68,6 +69,7 @@ lake env lean AuditAxioms.lean
 Expected output:
 
 ```
+'Focil.focil_one_of_n_protection' does not depend on any axioms
 'Focil.focil_censorship_resistance' does not depend on any axioms
 'Focil.censoring_block_not_canonical' does not depend on any axioms
 'Focil.canonical_implies_compliant' does not depend on any axioms
