@@ -1,0 +1,76 @@
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+    workflow_dispatch:
+
+jobs:
+    build-and-audit:
+        name: Build, type-check, and audit axioms
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v4
+
+            # `elan` reads `lean-toolchain` and installs the pinned Lean
+            # version; no manual version selection here.
+            - name: Install Lean toolchain via elan
+              uses: leanprover/lean-action@v1
+              with:
+                  use-mathlib-cache: false
+                  test: false
+                  lint: false
+                  build: false
+
+            - name: Build main library
+              run: lake build
+
+            - name: Build tests library
+              run: lake build Tests
+
+            # Reproduces the axiom-freeness check documented in README
+            # and CONTRIBUTING. Fails the job if any of the listed
+            # theorems acquires an axiom dependency (including
+            # sorryAx, Classical.choice, propext, etc.).
+            - name: Audit axiom dependencies
+              run: |
+                  cat > AuditAxioms.lean <<'EOF'
+                  import FocilLean4
+
+                  #print axioms Focil.focil_censorship_resistance
+                  #print axioms Focil.censoring_block_not_canonical
+                  #print axioms Focil.canonical_implies_compliant
+                  #print axioms Focil.noncompliant_block_not_canonical
+                  #print axioms Focil.compliant_includes_or_excused
+                  EOF
+                  OUTPUT=$(lake env lean AuditAxioms.lean)
+                  echo "$OUTPUT"
+                  # Each line must end with "does not depend on any axioms".
+                  # If grep finds any other "depends on" line, fail.
+                  if echo "$OUTPUT" | grep -E "depends on axioms" >/dev/null; then
+                    echo "::error::A safety theorem depends on a kernel axiom."
+                    exit 1
+                  fi
+                  # Sanity: ensure all five lines are present.
+                  COUNT=$(echo "$OUTPUT" | grep -c "does not depend on any axioms")
+                  if [ "$COUNT" -ne 5 ]; then
+                    echo "::error::Expected 5 axiom-free theorems, found $COUNT."
+                    exit 1
+                  fi
+                  rm AuditAxioms.lean
+
+            # Belt-and-braces sorry check independent of the axiom
+            # audit (a `sorry` always surfaces as `sorryAx` above, so
+            # this is redundant, but cheap, and a positive grep is
+            # easier to read in CI logs than a `#print axioms` diff).
+            - name: Confirm no `sorry` in any Lean source
+              run: |
+                  if grep -rn "sorry" --include="*.lean" .; then
+                    echo "::error::Found 'sorry' in a Lean source file."
+                    exit 1
+                  fi
