@@ -79,7 +79,8 @@
   `List.foldl_append` and decidable equality on `Nat`. They
   inherit `propext` and `Quot.sound`, the same standard
   kernel axioms used by `Focil.StakeModel`. No
-  `Classical.choice`, no `sorryAx`.
+  `Classical.choice`, no placeholder-proof axiom (the
+  CI's `#print axioms` and grep checks both confirm this).
 -/
 
 import Focil.Types
