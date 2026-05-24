@@ -60,30 +60,49 @@ namespace Focil
   of the gas-arithmetic layer.
 -/
 
-/--
-  Whether transaction `tx` could be validly appended to the end
-  of block `b`'s transactions, given `b`'s post-state.
+/-
+  ## On the validity predicate
 
-  Formal counterpart of the EL check described in EIP-7805
+  Whether transaction `tx` could be validly appended to the end
+  of block `b`'s transactions, given `b`'s post-state, is the
+  formal counterpart of the EL check described in EIP-7805
   §"Execution Layer":
 
   > "Validate T against S by checking the nonce and balance of
   >  T.origin."
 
-  We do not reproduce this check. Reproducing it would require
-  modelling the EVM, which is far outside scope (FINDINGS.md
-  §4.3). Instead we expose `CanAppend` as the abstraction the rest
-  of the formalisation works with.
+  We do not reproduce a full EVM implementation. Two options
+  are exposed:
 
-  The polarity matters: a transaction `tx` for which `CanAppend tx
-  b` *holds* is one the proposer is *forbidden* from omitting
-  (modulo block fullness). The proposer's legitimate-omission
-  exemption is exactly `¬ CanAppend tx b`.
+  1. **Opaque** (`Focil.CanAppend` below). The default for
+     callers who do not wish to commit to a concrete model.
+     Universally quantifiable; safety holds against any
+     realisation.
+  2. **Concrete** (`Focil.canAppendToBlock` from
+     `Focil/AccountState.lean`). A nonce-only account-state
+     model that mirrors the cheap nonce-and-balance proxy
+     soispoke describes for EOAs in his Mar 16 ethereum-magicians
+     post. The end-to-end safety theorem in
+     `Focil/EndToEnd.lean` discharges the entire safety chain
+     against this concrete predicate, with no opaqueness
+     remaining anywhere.
 
-  The proof is universally quantified over `CanAppend`. Concrete
-  censorship-resistance claims against a real Ethereum
-  implementation require a faithful `CanAppend` realization, which
-  this repository does not provide.
+  The polarity matters: a transaction `tx` for which the
+  validity predicate *holds* is one the proposer is *forbidden*
+  from omitting (modulo block fullness). The proposer's
+  legitimate-omission exemption is exactly the negation.
+-/
+
+/--
+  Abstract validity predicate, available as a default when a
+  caller does not wish to commit to a concrete EVM-validity
+  model. Universally quantifiable; the safety theorems do not
+  rely on its opacity.
+
+  A consumer wishing to talk about a concrete model can pass
+  any predicate `Transaction → Block → Prop` directly to the
+  parameterised safety theorems; the opaque predicate is only
+  one possible choice.
 -/
 opaque CanAppend : Transaction → Block → Prop
 
@@ -98,16 +117,15 @@ opaque CanAppend : Transaction → Block → Prop
   transaction `tx ∈ il.transactions`, *one* of the following holds:
 
   - `tx ∈ b.transactions` (already included), or
-  - `¬ CanAppend tx b` (cannot be appended → legitimate omission),
+  - `¬ canAppend tx b` (cannot be appended, legitimate omission),
     or
-  - `full b` (block is full → legitimate omission).
+  - `full b` (block is full, legitimate omission).
 
-  The `full` predicate is a parameter so that callers can plug in
-  whatever fullness model fits their setting. The example
-  scenarios in `Tests/Examples.lean` use a constantly-false
-  `neverFull` to isolate the other rule branches; a richer
-  model would compute fullness from `gasLimit` and the
-  cumulative gas of `transactions`.
+  Both `canAppend` and `full` are parameters so callers can plug
+  in whatever validity and fullness models fit their setting. The
+  example scenarios in `Tests/Examples.lean` use the abstract
+  `CanAppend` for backwards compatibility; the end-to-end
+  scenarios use a concrete account-state predicate.
 
   Disclosed limitation (FINDINGS.md §2.5): this predicate
   quantifies over IL transactions independently. Sequential
@@ -115,10 +133,11 @@ opaque CanAppend : Transaction → Block → Prop
   to have been appended first) is not captured.
 -/
 def CompliantWith
+    (canAppend : Transaction → Block → Prop)
     (full : Block → Prop)
     (b : Block) (il : InclusionList) : Prop :=
   ∀ tx ∈ il.transactions,
-    tx ∈ b.transactions ∨ ¬ CanAppend tx b ∨ full b
+    tx ∈ b.transactions ∨ ¬ canAppend tx b ∨ full b
 
 -- =========================================================================
 -- Store-wide compliance
@@ -141,10 +160,11 @@ def CompliantWith
   guard `IsConsidered state il`.
 -/
 def FocilCompliant
+    (canAppend : Transaction → Block → Prop)
     (full : Block → Prop)
     (b : Block) (state : FocilState) : Prop :=
   ∀ il ∈ state.stored_ils,
-    IsConsidered state il → CompliantWith full b il
+    IsConsidered state il → CompliantWith canAppend full b il
 
 -- =========================================================================
 -- Auxiliary lemmas
@@ -159,13 +179,14 @@ def FocilCompliant
   more cleanly.
 -/
 theorem compliant_includes_or_excused
+    {canAppend : Transaction → Block → Prop}
     {full : Block → Prop} {b : Block} {state : FocilState}
     {il : InclusionList} {tx : Transaction}
-    (hCompl : FocilCompliant full b state)
+    (hCompl : FocilCompliant canAppend full b state)
     (hIl    : il ∈ state.stored_ils)
     (hConsidered : IsConsidered state il)
     (hTx    : tx ∈ il.transactions) :
-    tx ∈ b.transactions ∨ ¬ CanAppend tx b ∨ full b :=
+    tx ∈ b.transactions ∨ ¬ canAppend tx b ∨ full b :=
   hCompl il hIl hConsidered tx hTx
 
 end Focil

@@ -16,6 +16,10 @@
   - `Focil.AccountState`: nonce-only EVM-validity model;
     formalizes the adversarial-validity attack from
     FINDINGS §2.3 as a theorem.
+  - `Focil.EndToEnd`: end-to-end safety theorems against a
+    concrete EVM-validity model. Pins the validity predicate
+    to the nonce proxy from `Focil.AccountState`; lifts the
+    last opacity from the safety chain.
 
   See README.md for the project overview, FINDINGS.md for the
   research log, and CONTRIBUTING.md for build instructions.
@@ -28,3 +32,4 @@ import Focil.Helpers
 import Focil.Safety
 import Focil.StakeModel
 import Focil.AccountState
+import Focil.EndToEnd

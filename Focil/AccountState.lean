@@ -243,50 +243,21 @@ theorem front_running_breaks_appendability
     ¬ canAppendToBlock initial
         { b with transactions := b.transactions ++ [tx_evil] }
         tx_il := by
-  -- Goal:
-  --   ¬ canAppendToBlock initial
-  --       { b with transactions := b.transactions ++ [tx_evil] } tx_il
-  --
-  -- Unfold to:
-  --   ¬ tx_il.nonce =
-  --       postState initial (b.transactions ++ [tx_evil]) tx_il.sender
-  --
-  -- Then `postState_append_singleton` gives us:
-  --   ¬ tx_il.nonce =
-  --       applyTx (postState initial b.transactions) tx_evil tx_il.sender
-  --
-  -- Let s = postState initial b.transactions.
-  -- From h_il_appendable:   tx_il.nonce   = s tx_il.sender.
-  -- From h_evil_appendable: tx_evil.nonce = s tx_evil.sender.
-  -- From h_same_sender + h_same_nonce + the above, the applyTx
-  -- condition fires and the value at tx_il.sender becomes
-  -- s tx_il.sender + 1, which differs from tx_il.nonce.
   intro h_app
   unfold canAppendToBlock canAppendNonce at h_app
   rw [show ({ b with transactions := b.transactions ++ [tx_evil] }
            : Block).transactions = b.transactions ++ [tx_evil] from rfl,
       postState_append_singleton] at h_app
-  -- h_app : tx_il.nonce =
-  --         applyTx (postState initial b.transactions) tx_evil tx_il.sender
-  -- Unfold applyTx and use the condition's truth.
   unfold applyTx at h_app
-  -- The condition for the `if` is
-  --   tx_il.sender = tx_evil.sender ∧ tx_evil.nonce = s tx_evil.sender
-  -- We prove both conjuncts and then rewrite via `if_pos`.
   have h_cond_left : tx_il.sender = tx_evil.sender := h_same_sender.symm
   have h_cond_right :
       tx_evil.nonce = postState initial b.transactions tx_evil.sender :=
     h_evil_appendable
   rw [if_pos ⟨h_cond_left, h_cond_right⟩] at h_app
-  -- h_app : tx_il.nonce =
-  --         postState initial b.transactions tx_il.sender + 1
-  -- From h_il_appendable: tx_il.nonce = postState ... tx_il.sender.
   have h_il_nonce :
       tx_il.nonce = postState initial b.transactions tx_il.sender :=
     h_il_appendable
   rw [h_il_nonce] at h_app
-  -- h_app : postState ... tx_il.sender = postState ... tx_il.sender + 1
-  -- Contradiction via Nat.succ_ne_self.
   exact Nat.succ_ne_self _ h_app.symm
 
 end Focil

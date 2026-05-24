@@ -662,28 +662,45 @@ A future extension could refine `FocilState` to track timestamps
 and prove the discrete transition rules; that is genuine extra
 protocol modelling, not a missing piece of the safety argument.
 
-### 4.3 Why is `CanAppend` opaque?
+### 4.3 Why is `CanAppend` opaque (in the abstract chain)?
 
 **Verification status:** MODEL LIMITATION DISCLOSED.
 
-`CanAppend tx b` is the formal counterpart of "the EVM can validly
-execute `tx` after `b`". Reproducing the EVM is far out of scope.
-The opacity makes the safety theorem read as:
+`Focil.CanAppend` in `Focil/Protocol.lean` is the abstract
+opaque option for the validity predicate, exposed as a default
+when a caller does not wish to commit to a concrete EVM-validity
+model. Reproducing the full EVM is far out of scope. The opacity
+makes the abstract version of the safety theorem read as:
 
 > _Modulo a faithful implementation of EVM-validity_, FOCIL's
 > fork-choice rule guarantees censorship resistance.
 
-Refining `CanAppend` to an explicit semantics (e.g., a per-account
-nonce/balance abstraction in the spirit of `consensus-specs`'
-"Payload Construction" section) would let us prove additional
-properties; for example, that conditional inclusion does not
-introduce false positives. This is the most natural next step.
+`Focil/EndToEnd.lean` lifts this opacity for the EOA case.
+The validity predicate is parameterised throughout the safety
+chain (`Focil/Protocol.lean`, `Focil/Safety.lean`,
+`Focil/StakeModel.lean`); a caller can pass either the
+abstract opaque predicate or a concrete realization. The
+concrete realization currently shipped, `canAppendToBlock`
+from `Focil/AccountState.lean`, is the cheap nonce proxy that
+matches the EOA case described by EIP-7805's lead author in his
+Mar 16 2026 ethereum-magicians post. The end-to-end theorems
+`focil_concrete_safety` and `focil_concrete_pos_safety`
+discharge the entire safety chain against this concrete
+predicate, with no opaque predicate remaining anywhere.
 
-**Cross-reference:** §2.3 (refining `CanAppend` is also the entry
-point to a formal threat model for adversarial validity changes);
-§2.5 (sequential dependence is a structural change that goes
-_beyond_ refining `CanAppend`); §2.7 (the opacity of `CanAppend`
-is what forced the per-attester store relativisation).
+The remaining caveat is that the concrete EOA model is
+**nonce-only**; balance-awareness, EIP-7702 delegation, and
+EIP-8141 Frame Transactions are out of scope. Each of these
+extends the concrete model in a structurally similar way; see
+CONTRIBUTING.md for the prioritised follow-on list.
+
+**Cross-reference:** §2.3 (the front-running attack at the
+appendability layer is now formalized as a theorem against the
+concrete model); §2.5 (sequential dependence between IL
+transactions is a structural change that goes _beyond_
+refining the validity predicate); §2.7 (the parameterisation
+of compliance is what enables the same safety chain to fire
+against either the abstract or the concrete model).
 
 ---
 

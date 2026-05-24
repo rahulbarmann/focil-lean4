@@ -43,7 +43,8 @@ lean_lib FocilLean4 where
     `Focil.Helpers,
     `Focil.Safety,
     `Focil.StakeModel,
-    `Focil.AccountState
+    `Focil.AccountState,
+    `Focil.EndToEnd
   ]
 
 lean_lib Tests where

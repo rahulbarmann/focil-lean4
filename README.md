@@ -8,14 +8,15 @@ A Lean 4 formalization of FOCIL, the consensus-layer
 censorship-resistance mechanism specified in
 [EIP-7805](https://eips.ethereum.org/EIPS/eip-7805) (the headline
 feature of Ethereum's late-2026 Hegotá hard fork). Proves that
-under two precisely stated assumptions about the underlying
-fork-choice rule, a transaction listed in a stored,
-non-equivocating inclusion list cannot be excluded from a
-canonical block (modulo invalidity and block fullness). Build is
-green on Lean 4.29.1; the safety proof is `sorry`-free and
-depends on zero kernel axioms; ships with a non-vacuous
-3-validator instance demonstrating the theorem firing on a real
-scenario.
+under Ethereum's standard ">2/3 honest validators" assumption, a
+transaction listed in a stored, non-equivocating inclusion list
+cannot be excluded from a canonical block (modulo invalidity and
+block fullness). Ships with both an abstract version of the
+theorem and a fully concrete end-to-end version against a
+nonce-only account-state model, with no opaque predicates
+remaining. Build is green on Lean 4.29.1; the safety proofs are
+`sorry`-free, and the five pure safety theorems depend on zero
+kernel axioms.
 
 ---
 
@@ -34,47 +35,69 @@ dependencies.
 
 ## What is proven
 
-**End-to-end PoS-derived theorem**
-(`Focil.focil_pos_derived_safety`, in
-[`Focil/StakeModel.lean`](Focil/StakeModel.lean)):
+**End-to-end PoS-derived theorem against a concrete
+EVM-validity model**
+(`Focil.focil_concrete_pos_safety`, in
+[`Focil/EndToEnd.lean`](Focil/EndToEnd.lean)):
 
 > Fix any `StakeModel` with strictly more than 2/3 honest
 > validators (the standard Ethereum PoS supermajority
-> assumption), and any `AttesterRun` over that model where
-> honest validators only vote for FOCIL-compliant blocks. For
-> any block `b` and transaction `tx`: if some inclusion list
-> stored in `r.state` and not in `r.state.equivocators`
-> contains `tx`, the block has accumulated a strict 2/3
-> quorum of votes, `tx` could be validly appended to `b`, and
-> `b` is not full, then `tx ∈ b.transactions`.
+> assumption), any `AttesterRun` over that model whose
+> `canAppend` is pinned to a concrete account-state predicate,
+> and an `initial : AccountState` representing the genesis
+> account state. For any block `b` and transaction `tx`: if
+> some inclusion list stored in `r.state` and not in
+> `r.state.equivocators` contains `tx`, the block has
+> accumulated a strict 2/3 quorum of votes, `tx`'s nonce
+> matches its sender's next-expected nonce in `b`'s
+> post-state, and `b` is not full, then
+> `tx ∈ b.transactions`.
 
-This is the marquee result of the project. Both structural
-obligations of the underlying fork-choice rule
-(`quorum_has_honest_voter`, `honest_attester_compliance`) are
-_derived_, not postulated. The only remaining axioms-of-faith
-are Ethereum's standard ">2/3 honest" assumption (encoded as
-`s.honest_majority`), the spec's "honest attesters refuse
-non-compliant blocks" rule (encoded as `r.honest_rule`), and
-the faithfulness of the abstract `CanAppend` predicate.
+This is the marquee result of the project. No `ForkChoice`
+postulates remain. No opaque predicates remain. The validity
+predicate is the cheap nonce proxy described by EIP-7805 lead
+author Thomas Thiery in his
+[Mar 16 2026 ethereum-magicians post](https://ethereum-magicians.org/t/focil-native-account-abstraction/27999)
+on FOCIL handshake Native Account Abstraction:
+"This proxy is cheap... and works well for EOAs and EIP-7702."
+The same module also exposes the builder-side contrapositive
+`Focil.focil_concrete_pos_censoring_block_not_canonical`: a
+block omitting a nonce-valid IL transaction cannot be the
+canonical chain head.
 
-**Headline 1-of-N theorem** (`Focil.focil_one_of_n_protection`,
+The only remaining axioms-of-faith are Ethereum's standard
+">2/3 honest" assumption (encoded as `s.honest_majority`) and
+the spec's "honest attesters refuse non-compliant blocks" rule
+(encoded as `r.honest_rule`).
+
+**End-to-end PoS-derived theorem (abstract validity)**
+(`Focil.focil_pos_derived_safety`, in
+[`Focil/StakeModel.lean`](Focil/StakeModel.lean)):
+
+The same end-to-end claim against an abstract opaque validity
+predicate, for callers who do not wish to commit to the
+concrete account-state model. The concrete theorem is a
+specialization of this one.
+
+**Headline 1-of-N theorem (parameterised over validity)**
+(`Focil.focil_one_of_n_protection`,
 in [`Focil/Safety.lean`](Focil/Safety.lean)):
 
 > Fix any `ForkChoice` value `fc`. For any block `b` and
 > transaction `tx`: if some inclusion list in
 > `fc.state.stored_ils` whose author is not in
-> `fc.state.equivocators` contains `tx`, `tx` is appendable to
-> `b`, `b` is not full, and `b` is canonical under `fc`, then
-> `tx ∈ b.transactions`.
+> `fc.state.equivocators` contains `tx`, `tx` is appendable
+> under `fc.canAppend`, `b` is not full, and `b` is canonical
+> under `fc`, then `tx ∈ b.transactions`.
 
 This is the formal counterpart of EIP-7805's marquee 1-of-N
-honesty claim: it suffices that _at least one_ non-equivocating
-IL committee member listed `tx`. Adversaries controlling some
-committee seats and equivocating others do not defeat the
-guarantee, as long as at least one seat publishes a
-non-equivocating IL containing `tx`. The end-to-end PoS-derived
-theorem above is a corollary (instantiate `fc` with
-`AttesterRun.toForkChoice`).
+honesty claim against an abstract `ForkChoice`: it suffices
+that _at least one_ non-equivocating IL committee member listed
+`tx`. Adversaries controlling some committee seats and
+equivocating others do not defeat the guarantee, as long as at
+least one seat publishes a non-equivocating IL containing
+`tx`. The end-to-end PoS-derived theorems above are corollaries
+(instantiate `fc` with `AttesterRun.toForkChoice`).
 
 **Per-IL building block**
 (`Focil.focil_censorship_resistance`): same statement but takes
@@ -103,12 +126,15 @@ realization of the threat model in FINDINGS.md §2.3.
 
 **The proof depends on:**
 
-1. The abstract opaque predicate
-   `CanAppend : Transaction → Block → Prop`, modelling
-   "EVM-valid appendability". The proof is universally
-   quantified over all `CanAppend` realizations, but a real
-   claim against a real Ethereum implementation requires a
-   faithful concrete `CanAppend`.
+1. The validity predicate, parameterised by the safety chain
+   so that callers can plug in either an abstract opaque
+   predicate or a concrete EVM-validity model. The default
+   abstract predicate `CanAppend : Transaction → Block → Prop`
+   is opaque; the concrete realization
+   [`Focil.canAppendToBlock`](Focil/AccountState.lean) is a
+   nonce-only account-state model. The end-to-end concrete
+   theorem is universally quantified over the choice of
+   `initial : AccountState`.
 2. The "honest attesters refuse non-compliant blocks" rule is
    encoded as the `honest_rule` field of `AttesterRun`. This
    is the per-attester rule EIP-7805 specifies as the
@@ -118,7 +144,7 @@ realization of the threat model in FINDINGS.md §2.3.
    standard PoS safety assumption underlying every other
    Ethereum consensus result.
 
-The repository ships three demonstrations:
+The repository ships four demonstrations:
 
 - `Tests.Examples.emptyForkChoice` discharges the abstract
   `ForkChoice` obligations vacuously (sanity check only).
@@ -128,8 +154,15 @@ The repository ships three demonstrations:
 - `Tests.Examples.attesterRun4v` builds a 4-validator
   `StakeModel` and `AttesterRun` from scratch and derives
   everything via `AttesterRun.toForkChoice`. Scenario 12 fires
-  `focil_pos_derived_safety` against it with no postulates
-  remaining.
+  `focil_pos_derived_safety` against it with no `ForkChoice`
+  postulates remaining.
+- `Tests.Examples.attesterRun4vConcrete` pins `canAppend` to
+  the concrete account-state predicate. Scenario 14 fires
+  `focil_concrete_pos_censoring_block_not_canonical` against
+  it: every hypothesis is decidable on concrete data, no
+  opaque predicate appears anywhere, and the conclusion (a
+  block omitting a nonce-valid IL transaction cannot be
+  canonical) is forced as a Lean kernel-checked consequence.
 
 **The architectural claim** captured by the proof structure:
 FOCIL censorship resistance is a structural consequence of
@@ -146,7 +179,12 @@ architectural rationale.
 This formalization is deliberately scoped. It does **not**
 model:
 
-- The EVM. Validity is captured by the abstract `CanAppend`.
+- A full EVM. The concrete EVM-validity layer covers
+  per-sender nonces only (matching the EOA proxy described
+  by EIP-7805's lead author). Balance-aware validity,
+  EIP-7702 delegations, and EIP-8141 Frame Transactions are
+  out of scope. See FINDINGS.md §2.3 and §4.3 for what this
+  excludes.
 - Liveness or progress. We prove non-canonicality of bad
   blocks but not the existence of good ones.
 - IL gossip or the network layer. Network-level censorship
@@ -191,11 +229,12 @@ focil-lean4/
 │   ├── Protocol.lean            # CompliantWith, FocilCompliant
 │   ├── ForkChoice.lean          # ForkChoice structure + canonicality lemma
 │   ├── Helpers.lean             # small reusable lemmas
-│   ├── Safety.lean              # headline theorem and per-IL building block
+│   ├── Safety.lean              # parameterised headline theorem and per-IL building block
 │   ├── StakeModel.lean          # PoS-derived ForkChoice; >2/3 honest assumption
-│   └── AccountState.lean        # nonce-only EVM-validity model; FINDINGS §2.3
+│   ├── AccountState.lean        # nonce-only EVM-validity model; FINDINGS §2.3
+│   └── EndToEnd.lean            # end-to-end safety against the concrete model
 ├── Tests/
-│   └── Examples.lean            # 13 worked scenarios; concrete ForkChoice instances
+│   └── Examples.lean            # 14 worked scenarios; concrete ForkChoice instances
 └── .github/
     ├── workflows/ci.yml         # CI: build, type-check, axiom audit
     └── ISSUE_TEMPLATE/          # issue and PR templates
@@ -238,14 +277,23 @@ suggested order:
    the nonce-only EVM-validity model. Formalizes the
    front-running attack from FINDINGS §2.3 as the theorem
    `front_running_breaks_appendability`.
-9. **[`Tests/Examples.lean`](Tests/Examples.lean)**: thirteen
-   concrete scenarios. Scenario 12 fires the PoS-derived
-   end-to-end theorem; Scenario 13 fires the front-running
-   attack on concrete data; Scenario 11 fires the 1-of-N
-   theorem on the abstract `ForkChoice`; Scenarios 6–10 fire
-   the per-IL building block, the contrapositive, and the
-   equivocator degradation.
-10. **[`FINDINGS.md`](FINDINGS.md)**: the research log; nine
+9. **[`Focil/EndToEnd.lean`](Focil/EndToEnd.lean)**: the
+   end-to-end concrete safety theorems.
+   `focil_concrete_safety` discharges the entire safety chain
+   against the concrete account-state predicate; the
+   PoS-derived corollary `focil_concrete_pos_safety` does the
+   same starting from the >2/3 honest assumption. No opaque
+   predicates remain.
+10. **[`Tests/Examples.lean`](Tests/Examples.lean)**: fourteen
+    concrete scenarios. Scenario 14 fires the concrete
+    PoS-derived contrapositive on real account-state data;
+    Scenario 12 fires the abstract PoS-derived theorem;
+    Scenario 13 fires the front-running attack on concrete
+    data; Scenario 11 fires the 1-of-N theorem on the
+    abstract `ForkChoice`; Scenarios 6–10 fire the per-IL
+    building block, the contrapositive, and the equivocator
+    degradation.
+11. **[`FINDINGS.md`](FINDINGS.md)**: the research log; nine
     items spanning spec gaps, model limits, and the
     abstraction-level discoveries that emerged from building
     the formalization.
@@ -255,14 +303,18 @@ suggested order:
 ## Verifying axiom-freeness
 
 Lean's kernel can report which axioms a theorem depends on.
-The four pure safety theorems in `Focil/Safety.lean` depend on
-**zero** kernel axioms (not even `Classical.choice` or
-`propext`). The PoS-derived end-to-end theorem in
-`Focil/StakeModel.lean` additionally depends on `propext` and
-`Quot.sound`, two foundational kernel axioms that ship with
-every Lean installation and are accepted without controversy
-across the Lean community. `Classical.choice` and `sorryAx`
-are not used anywhere in the project.
+The four pure parameterised safety theorems in
+`Focil/Safety.lean` and the end-to-end concrete safety
+theorem `Focil.focil_concrete_safety` in `Focil/EndToEnd.lean`
+all depend on **zero** kernel axioms (not even
+`Classical.choice` or `propext`). The PoS-derived end-to-end
+theorems in `Focil/StakeModel.lean` and the concrete
+`Focil/EndToEnd.lean` PoS variant additionally depend on
+`propext` and `Quot.sound`, two foundational kernel axioms
+that ship with every Lean installation and are accepted
+without controversy across the Lean community.
+`Classical.choice` and `sorryAx` are not used anywhere in the
+project.
 
 To reproduce the audit, create a file with:
 
@@ -276,6 +328,9 @@ import FocilLean4
 #print axioms Focil.AttesterRun.toForkChoice
 #print axioms Focil.focil_pos_derived_safety
 #print axioms Focil.front_running_breaks_appendability
+#print axioms Focil.focil_concrete_safety
+#print axioms Focil.focil_concrete_pos_safety
+#print axioms Focil.focil_concrete_pos_censoring_block_not_canonical
 ```
 
 and run:
@@ -294,12 +349,15 @@ You should see:
 'Focil.AttesterRun.toForkChoice' depends on axioms: [propext, Quot.sound]
 'Focil.focil_pos_derived_safety' depends on axioms: [propext, Quot.sound]
 'Focil.front_running_breaks_appendability' depends on axioms: [propext, Quot.sound]
+'Focil.focil_concrete_safety' does not depend on any axioms
+'Focil.focil_concrete_pos_safety' depends on axioms: [propext, Quot.sound]
+'Focil.focil_concrete_pos_censoring_block_not_canonical' depends on axioms: [propext, Quot.sound]
 ```
 
 CI runs this check on every push (see
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) and
 fails the build if `Classical.choice` or `sorryAx` is
-introduced anywhere, or if any of the four pure safety
+introduced anywhere, or if any of the five pure safety
 theorems acquires _any_ axiom dependency.
 
 ---
@@ -410,17 +468,26 @@ References:
 
 ## Contributing and follow-on work
 
-The PoS-derived `ForkChoice` instantiation
-(`Focil/StakeModel.lean`) discharges the headline theorem's
-two structural obligations from a >2/3 honest-validator
-assumption, demonstrated end-to-end by Scenario 12 of
-`Tests/Examples.lean`. The natural next milestones tighten
-the remaining abstractions.
+The end-to-end concrete safety theorems
+(`Focil/EndToEnd.lean`) discharge the headline 1-of-N claim
+against a nonce-only account-state model with no opaque
+predicates remaining. The natural next milestones extend the
+concrete EVM-validity layer to cover more of EIP-7805's threat
+surface.
+
+**Active milestone, balance-aware concrete validity.** The
+current concrete model tracks per-sender nonces only. A
+balance-aware variant would let us formalize the balance-drain
+attack from FINDINGS §2.3 (a colluding party drains a
+sender's balance below the base fee, invalidating the IL
+transaction) end-to-end against the same PoS-derived chain.
+Structurally identical to the nonce model; the case surface
+roughly doubles. This directly addresses
+[FINDINGS.md §4.3](FINDINGS.md#43-why-is-canappend-opaque).
 
 **Active milestone, refined `CompliantWith` capturing
-sequential validity dependence between IL transactions
-(target: 2–3 weeks from initial release).** The current
-`CompliantWith` predicate quantifies per-transaction
+sequential validity dependence between IL transactions.** The
+current `CompliantWith` predicate quantifies per-transaction
 independently against the final block, but EIP-7805
 §"Payload Construction" notes that an IL transaction can
 become valid because an earlier IL transaction was appended.
@@ -430,14 +497,14 @@ through the appendability check. This directly addresses
 
 **Other contribution opportunities, ordered by leverage:**
 
-1. **Refined `CanAppend` covering balance and AA dimensions.**
-   The current account-state model in
-   [`Focil/AccountState.lean`](Focil/AccountState.lean) tracks
-   nonces only. A balance-aware variant would let us formalize
-   the balance-drain attack from
-   [FINDINGS.md §2.3](FINDINGS.md#23-adversarial-validity-changes);
-   an EIP-7702-aware variant would cover the AA-revocation
-   attack.
+1. **EIP-8141 Frame Transactions and the bounded
+   validation-prefix replay rule.** EIP-7805's lead author
+   describes a refinement of the FOCIL omission check for
+   native AA transactions in his
+   [Mar 16 ethereum-magicians post](https://ethereum-magicians.org/t/focil-native-account-abstraction/27999).
+   Formalizing the bounded-VERIFY-execution check and the
+   per-IL VERIFY-gas budget would extend the concrete safety
+   chain to cover EIP-8141 Frame Transactions.
 2. **Equivocator-detection model.** Formalize
    `on_inclusion_list` and prove that a faithful execution
    correctly populates `state.equivocators`.

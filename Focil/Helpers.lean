@@ -19,11 +19,12 @@ namespace Focil
   unfolding makes downstream proofs read more naturally.
 -/
 theorem compliantWith_imp
+    {canAppend : Transaction → Block → Prop}
     {full : Block → Prop} {b : Block} {il : InclusionList}
     {tx : Transaction}
-    (h : CompliantWith full b il)
+    (h : CompliantWith canAppend full b il)
     (htx : tx ∈ il.transactions) :
-    tx ∈ b.transactions ∨ ¬ CanAppend tx b ∨ full b :=
+    tx ∈ b.transactions ∨ ¬ canAppend tx b ∨ full b :=
   h tx htx
 
 /--

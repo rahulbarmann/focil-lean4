@@ -87,32 +87,19 @@ theorem focil_censorship_resistance
     (h_tx_in_il      : tx ∈ il.transactions)
     (h_il_stored     : il ∈ fc.state.stored_ils)
     (h_il_considered : IsConsidered fc.state il)
-    (h_can_append    : CanAppend tx b)
+    (h_can_append    : fc.canAppend tx b)
     (h_block_not_full: ¬ fc.full b)
     (h_canonical     : IsCanonical fc b) :
     tx ∈ b.transactions := by
-  -- Step 1: canonicality forces FOCIL compliance against the
-  -- bundled context (this is where both ForkChoice obligations
-  -- are used).
-  have hCompl : FocilCompliant fc.full b fc.state :=
+  have hCompl : FocilCompliant fc.canAppend fc.full b fc.state :=
     canonical_implies_compliant fc b h_canonical
-  -- Step 2: instantiate compliance at our specific IL and tx,
-  -- yielding the per-tx three-way disjunction.
   have h := hCompl il h_il_stored h_il_considered tx h_tx_in_il
-  -- Step 3: case-split on the disjunction. Only the first case
-  -- can survive the remaining hypotheses.
   cases h with
-  | inl h_in =>
-    -- `tx ∈ b.transactions`: this is the goal.
-    exact h_in
+  | inl h_in => exact h_in
   | inr h_rest =>
     cases h_rest with
-    | inl h_not_appendable =>
-      -- `¬ CanAppend tx b` directly contradicts `h_can_append`.
-      exact (h_not_appendable h_can_append).elim
-    | inr h_full =>
-      -- `fc.full b` directly contradicts `h_block_not_full`.
-      exact (h_block_not_full h_full).elim
+    | inl h_not_appendable => exact (h_not_appendable h_can_append).elim
+    | inr h_full           => exact (h_block_not_full h_full).elim
 
 -- =========================================================================
 -- Headline theorem: FOCIL's 1-of-N censorship-resistance guarantee
@@ -162,11 +149,10 @@ theorem focil_one_of_n_protection
       ∃ il, il ∈ fc.state.stored_ils
             ∧ IsConsidered fc.state il
             ∧ tx ∈ il.transactions)
-    (h_can_append    : CanAppend tx b)
+    (h_can_append    : fc.canAppend tx b)
     (h_block_not_full: ¬ fc.full b)
     (h_canonical     : IsCanonical fc b) :
     tx ∈ b.transactions := by
-  -- Unpack the witness IL and discharge the per-IL theorem.
   obtain ⟨il, h_il_stored, h_il_considered, h_tx_in_il⟩ :=
     h_listed_by_some_honest_member
   exact focil_censorship_resistance fc b il tx
@@ -193,13 +179,11 @@ theorem censoring_block_not_canonical
     (h_tx_in_il      : tx ∈ il.transactions)
     (h_il_stored     : il ∈ fc.state.stored_ils)
     (h_il_considered : IsConsidered fc.state il)
-    (h_can_append    : CanAppend tx b)
+    (h_can_append    : fc.canAppend tx b)
     (h_block_not_full: ¬ fc.full b)
     (h_tx_excluded   : tx ∉ b.transactions) :
     ¬ IsCanonical fc b := by
   intro h_canonical
-  -- If the block were canonical the per-IL theorem would force
-  -- `tx ∈ b.transactions`, contradicting `h_tx_excluded`.
   exact h_tx_excluded
     (focil_censorship_resistance fc b il tx
       h_tx_in_il h_il_stored h_il_considered

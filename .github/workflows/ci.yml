@@ -50,6 +50,9 @@ jobs:
                   #print axioms Focil.AttesterRun.toForkChoice
                   #print axioms Focil.focil_pos_derived_safety
                   #print axioms Focil.front_running_breaks_appendability
+                  #print axioms Focil.focil_concrete_safety
+                  #print axioms Focil.focil_concrete_pos_safety
+                  #print axioms Focil.focil_concrete_pos_censoring_block_not_canonical
                   EOF
                   OUTPUT=$(lake env lean AuditAxioms.lean)
                   echo "$OUTPUT"
@@ -59,11 +62,15 @@ jobs:
                     exit 1
                   fi
                   # The four pure safety theorems must remain zero-axiom.
+                  # focil_concrete_safety is also zero-axiom because it
+                  # composes pure parameterised theorems with no axiom
+                  # dependencies of its own.
                   for THM in \
                     "focil_one_of_n_protection" \
                     "focil_censorship_resistance" \
                     "censoring_block_not_canonical" \
-                    "canonical_implies_compliant"; do
+                    "canonical_implies_compliant" \
+                    "focil_concrete_safety"; do
                     if ! echo "$OUTPUT" | grep -F "'Focil.$THM' does not depend on any axioms" >/dev/null; then
                       echo "::error::Focil.$THM no longer zero-axiom."
                       exit 1

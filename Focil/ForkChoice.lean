@@ -115,6 +115,14 @@ namespace Focil
 structure ForkChoice where
   /-- The fork-choice store snapshot at attestation time. -/
   state       : FocilState
+  /--
+    Validity predicate (formal counterpart of "EVM-valid
+    appendability"). Bundled here so concrete instances can
+    pin a specific model (e.g. nonce/balance proxy from
+    `Focil/AccountState.lean`) and the safety chain reads the
+    same predicate everywhere.
+  -/
+  canAppend   : Transaction → Block → Prop
   /-- The block-fullness model in force for this run. -/
   full        : Block → Prop
   /-- Validators who behave honestly in this run. -/
@@ -133,13 +141,13 @@ structure ForkChoice where
   /--
     Soundness obligation: honest validators only vote for blocks
     that are FOCIL-compliant against the bundled `state` under
-    the bundled `full` model.
+    the bundled `canAppend` and `full` models.
   -/
   honest_attester_compliance :
     ∀ (b : Block) (v : ValidatorIndex),
       IsHonest v →
       Voted v b →
-      FocilCompliant full b state
+      FocilCompliant canAppend full b state
 
 -- =========================================================================
 -- Canonicality
@@ -180,13 +188,10 @@ def IsCanonical (fc : ForkChoice) (b : Block) : Prop :=
 theorem canonical_implies_compliant
     (fc : ForkChoice) (b : Block)
     (h_canon : IsCanonical fc b) :
-    FocilCompliant fc.full b fc.state := by
-  -- Unfold canonicality to a quorum claim.
+    FocilCompliant fc.canAppend fc.full b fc.state := by
   have hQuorum : fc.HasQuorum b := h_canon
-  -- Extract a witness honest voter.
   obtain ⟨v, hHonest, hVoted⟩ :=
     fc.quorum_has_honest_voter b hQuorum
-  -- That honest vote forces compliance with the bundled store.
   exact fc.honest_attester_compliance b v hHonest hVoted
 
 /--
@@ -199,7 +204,7 @@ theorem canonical_implies_compliant
 -/
 theorem noncompliant_block_not_canonical
     (fc : ForkChoice) (b : Block)
-    (h_noncompliant : ¬ FocilCompliant fc.full b fc.state) :
+    (h_noncompliant : ¬ FocilCompliant fc.canAppend fc.full b fc.state) :
     ¬ IsCanonical fc b := by
   intro h_canon
   exact h_noncompliant

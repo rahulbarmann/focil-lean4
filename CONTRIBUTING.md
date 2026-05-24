@@ -59,6 +59,9 @@ import FocilLean4
 #print axioms Focil.AttesterRun.toForkChoice
 #print axioms Focil.focil_pos_derived_safety
 #print axioms Focil.front_running_breaks_appendability
+#print axioms Focil.focil_concrete_safety
+#print axioms Focil.focil_concrete_pos_safety
+#print axioms Focil.focil_concrete_pos_censoring_block_not_canonical
 ```
 
 Run:
@@ -77,14 +80,17 @@ Expected output:
 'Focil.AttesterRun.toForkChoice' depends on axioms: [propext, Quot.sound]
 'Focil.focil_pos_derived_safety' depends on axioms: [propext, Quot.sound]
 'Focil.front_running_breaks_appendability' depends on axioms: [propext, Quot.sound]
+'Focil.focil_concrete_safety' does not depend on any axioms
+'Focil.focil_concrete_pos_safety' depends on axioms: [propext, Quot.sound]
+'Focil.focil_concrete_pos_censoring_block_not_canonical' depends on axioms: [propext, Quot.sound]
 ```
 
-The four pure safety theorems depend on **zero** kernel
-axioms. The PoS-derived layer and the nonce-only account-state
-layer both use `propext` and `Quot.sound`, two foundational
-kernel axioms that ship with every Lean installation.
-`Classical.choice` and `sorryAx` are not used anywhere; if any
-line lists either, that is a regression. Please file an issue.
+The five pure theorems depend on **zero** kernel axioms. The
+PoS-derived layer and the nonce-only account-state layer both
+use `propext` and `Quot.sound`, two foundational kernel axioms
+that ship with every Lean installation. `Classical.choice` is
+not used anywhere; if any line lists it, that is a regression.
+Please file an issue.
 
 ## Concrete contribution opportunities
 

@@ -197,6 +197,13 @@ structure StakeModel where
 structure AttesterRun (s : StakeModel) where
   /-- The fork-choice store at attestation time. -/
   state : FocilState
+  /--
+    Validity predicate: the formal counterpart of "EVM-valid
+    appendability." Bundled here so a concrete instance can
+    pin a specific model and the safety chain stays consistent
+    end-to-end.
+  -/
+  canAppend : Transaction → Block → Prop
   /-- The block-fullness model in force. -/
   full  : Block → Prop
   /-- Per-validator/block vote relation (Bool). -/
@@ -204,14 +211,15 @@ structure AttesterRun (s : StakeModel) where
   /--
     Honest-attester compliance: validators flagged honest in
     the underlying `StakeModel` only vote for blocks that are
-    FOCIL-compliant against `state` under `full`. This is the
-    only substantive assumption beyond honest-supermajority.
+    FOCIL-compliant against `state` under `canAppend` and
+    `full`. This is the only substantive assumption beyond
+    honest-supermajority.
   -/
   honest_rule :
     ∀ (v : ValidatorIndex) (b : Block),
       s.honest v = true →
       voted v b = true →
-      FocilCompliant full b state
+      FocilCompliant canAppend full b state
 
 /--
   Quorum predicate: more than two-thirds of validators voted
@@ -260,20 +268,13 @@ def AttesterRun.hasQuorum {s : StakeModel} (r : AttesterRun s)
 def AttesterRun.toForkChoice {s : StakeModel} (r : AttesterRun s) :
     ForkChoice where
   state     := r.state
+  canAppend := r.canAppend
   full      := r.full
   IsHonest  := fun v => s.honest v = true
   HasQuorum := fun b => r.hasQuorum b
   Voted     := fun v b => r.voted v b = true
   quorum_has_honest_voter := by
     intro b hQuorum
-    -- We have:
-    --   s.honest_majority : 3 * |honest| > 2 * N
-    --   hQuorum            : 3 * |voters| > 2 * N
-    -- Adding: 3 * (|honest| + |voters|) > 4 * N.
-    -- So |honest| + |voters| > N (for any N ≥ 0; omega handles
-    -- the integer arithmetic). Apply filter_count_overlap on
-    -- `List.range N` with predicates `s.honest` and
-    -- `(fun v => r.voted v b)` to extract a witness.
     have hLen :
         (List.range s.numValidators).length <
         ((List.range s.numValidators).filter s.honest).length +
@@ -289,8 +290,6 @@ def AttesterRun.toForkChoice {s : StakeModel} (r : AttesterRun s) :
       filter_count_overlap _ _ _ hLen
     exact ⟨v, hHonestV, hVotedV⟩
   honest_attester_compliance := by
-    -- Direct from `r.honest_rule`, which is exactly this
-    -- statement once the Bool/Prop lift is unfolded.
     intro b v hHonest hVoted
     exact r.honest_rule v b hHonest hVoted
 
@@ -331,7 +330,7 @@ theorem focil_pos_derived_safety
       ∃ il, il ∈ r.state.stored_ils
             ∧ IsConsidered r.state il
             ∧ tx ∈ il.transactions)
-    (h_can_append    : CanAppend tx b)
+    (h_can_append    : r.canAppend tx b)
     (h_block_not_full: ¬ r.full b)
     (h_canonical     : IsCanonical r.toForkChoice b) :
     tx ∈ b.transactions :=
