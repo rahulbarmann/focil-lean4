@@ -42,7 +42,8 @@ lean_lib FocilLean4 where
     `Focil.ForkChoice,
     `Focil.Helpers,
     `Focil.Safety,
-    `Focil.StakeModel
+    `Focil.StakeModel,
+    `Focil.AccountState
   ]
 
 lean_lib Tests where

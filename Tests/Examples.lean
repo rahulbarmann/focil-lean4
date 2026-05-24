@@ -36,6 +36,13 @@
     `ForkChoice` obligations from a >2/3 honest validator
     assumption via `AttesterRun.toForkChoice`, and fires
     `focil_pos_derived_safety` with no postulates remaining.
+  - **Adversarial-validity attack** (Scenario 13): exhibits
+    the nonce-front-running attack from FINDINGS §2.3 as a
+    concrete instance of
+    `front_running_breaks_appendability`. Models a colluding
+    transaction with the same `(sender, nonce)` as the IL
+    transaction; once the proposer appends it, the IL
+    transaction is no longer appendable.
 -/
 
 import FocilLean4
@@ -721,6 +728,96 @@ example
   exact focil_pos_derived_safety
     attesterRun4v blockIncludes tx1
     h_witness h_can_append h_block_not_full h_canonical
+
+-- =========================================================================
+-- The front-running attack on a concrete account state
+-- =========================================================================
+
+/-
+  ## Scenario design (Scenario 13)
+
+  This scenario exhibits the front-running attack from
+  FINDINGS §2.3 as a concrete instance of
+  `front_running_breaks_appendability`.
+
+  - `senderA`: validator with EOA index 100 (matches `tx1.sender`).
+  - `tx_il`: the IL-listed transaction from sender 100, nonce 0.
+    This is `tx1` from earlier scenarios.
+  - `tx_evil`: a colluding party's transaction sharing
+    `(sender 100, nonce 0)`.
+  - `b_initial`: a block with no transactions yet, so the
+    post-state for sender 100 is still 0.
+  - Both `tx_il` and `tx_evil` are appendable to `b_initial`.
+  - The proposer extends `b_initial` with `tx_evil`. Now sender
+    100's expected nonce is 1, so `tx_il` is no longer
+    appendable.
+-/
+
+/-- A genesis-state account model: every sender starts at nonce 0. -/
+def stateGenesis : AccountState := AccountState.initial
+
+/-- The IL-listed tx (same as `tx1` above; redefined locally for clarity). -/
+def tx_il_attack : Transaction :=
+  { id := 1, sender := 100, nonce := 0, gas := 21000 }
+
+/-- The colluding party's tx, sharing sender and nonce with `tx_il_attack`. -/
+def tx_evil : Transaction :=
+  { id := 99, sender := 100, nonce := 0, gas := 21000 }
+
+/-- A block with no transactions yet. -/
+def b_initial : Block :=
+  { slot := 11, proposer := 99, transactions := [], gasLimit := 30000000 }
+
+/--
+  **Scenario 13: the front-running attack, concretely.**
+
+  Demonstrates `front_running_breaks_appendability` on real
+  data. We prove:
+
+  - `tx_il_attack` is appendable to `b_initial`.
+  - `tx_evil` is appendable to `b_initial`.
+  - After extending `b_initial` with `tx_evil`, `tx_il_attack`
+    is no longer appendable.
+
+  This is the formal counterpart of "the proposer can break
+  the IL transaction's appendability by colluding to advance
+  the same sender's nonce." Once `tx_il_attack` is no longer
+  appendable, the proposer can legitimately invoke EIP-7805's
+  conditional-inclusion exemption to omit it from the block,
+  and FOCIL's safety theorem says nothing about whether
+  `tx_il_attack` ends up included.
+
+  The attack costs the colluding party one gas-fee payment
+  for `tx_evil` plus the absence of a slashing penalty (the
+  attacker is not equivocating; they're just transacting).
+  This is the EOA-nonce-bumping attack from FINDINGS §2.3,
+  formalized.
+-/
+example :
+    ¬ canAppendToBlock stateGenesis
+        { b_initial with transactions :=
+          b_initial.transactions ++ [tx_evil] }
+        tx_il_attack := by
+  -- Same sender (both are 100).
+  have h_same_sender : tx_evil.sender = tx_il_attack.sender := by
+    simp [tx_evil, tx_il_attack]
+  -- IL tx is appendable: at nonce 0 with sender 100, the
+  -- genesis state's expected nonce for 100 is 0.
+  have h_il_appendable :
+      canAppendToBlock stateGenesis b_initial tx_il_attack := by
+    simp [canAppendToBlock, canAppendNonce, postState,
+          stateGenesis, AccountState.initial, b_initial,
+          tx_il_attack]
+  -- Evil tx is appendable for the same reason.
+  have h_evil_appendable :
+      canAppendToBlock stateGenesis b_initial tx_evil := by
+    simp [canAppendToBlock, canAppendNonce, postState,
+          stateGenesis, AccountState.initial, b_initial,
+          tx_evil]
+  -- Apply the front-running theorem.
+  exact front_running_breaks_appendability
+    stateGenesis b_initial tx_il_attack tx_evil
+    h_same_sender h_il_appendable h_evil_appendable
 
 end Examples
 end Focil

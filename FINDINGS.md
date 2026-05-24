@@ -58,6 +58,20 @@ are spec-hygiene issues and disclosed model limitations.
   equivocation at the bandwidth level only. Demonstrated by
   example in `Tests/Examples.lean` Scenarios 9–10.
 
+- **§2.3, Adversarial validity changes are formally
+  exhibited.** A colluding party sharing an IL transaction's
+  `(sender, nonce)` can submit a transaction that, once
+  appended by the proposer, makes the IL transaction
+  non-appendable. The proposer can then legitimately invoke
+  the conditional-inclusion exemption. This is formalized as
+  the theorem `front_running_breaks_appendability` in
+  `Focil/AccountState.lean`, with `Tests/Examples.lean`
+  Scenario 13 demonstrating the attack on concrete data. The
+  protocol-level question for the EIP authors: should the EIP
+  commit to a per-account-state abstraction the proposer must
+  respect, or is the gas cost of the colluding transaction
+  considered a sufficient deterrent?
+
 ### Spec-hygiene issues
 
 - **§1.3, `MAX_TRANSACTIONS_PER_INCLUSION_LIST = 1`** is
@@ -287,8 +301,10 @@ makes it crisp.
 
 ### 2.3 Adversarial validity changes
 
-**Verification status:** OPEN QUESTION.
-**Engagement:** OPEN.
+**Verification status:** CONFIRMED AGAINST SPEC (concrete
+attack formalized).
+**Engagement:** OPEN (slashing/mitigation policy is the
+unresolved question).
 
 Conditional inclusion is the most subtle part of FOCIL. A proposer
 may legitimately omit IL transaction `tx` if `tx` is no longer
@@ -315,22 +331,62 @@ believed was includable. EIP-7805 §"Payload Construction" addresses
 the _efficiency_ of compliance checking but does not address
 whether this manipulation is itself a censorship attack.
 
-The Lean formalization makes this issue formally explicit:
-`CanAppend tx b` is a property of `(tx, b)`, where `b` is whatever
-state the proposer constructed. The safety theorem's hypothesis
-`CanAppend tx b` is exactly the assertion that the proposer cannot
-hide behind invalidity. In other words: _the formal theorem holds
-modulo the proposer being unable to construct a block that
-selectively invalidates `tx`_.
+The Lean formalization captures this issue formally on two
+levels:
 
-This is a genuine open research question and a candidate for a
-follow-on formalisation: under what threat model can we prove that
-an honest IL transaction remains appendable through to block
-production?
+1. The main safety theorems take `h_can_append` as a hypothesis
+   universally quantified over `CanAppend`. Under any concrete
+   realization, the hypothesis can be made false by an
+   adversary who picks `b` adversarially. The safety theorem
+   then says nothing.
 
-**Cross-reference:** §4.3 explains why `CanAppend` is opaque; §2.5
-explains why even a refined `CanAppend` would not, on its own,
-recover sequential dependence.
+2. `Focil/AccountState.lean` instantiates one such concrete
+   realization (a nonce-only account-state model) and proves
+   the front-running attack as a theorem:
+
+    ```lean
+    theorem front_running_breaks_appendability
+        (initial : AccountState) (b : Block)
+        (tx_il tx_evil : Transaction)
+        (h_same_sender    : tx_evil.sender = tx_il.sender)
+        (h_il_appendable  : canAppendToBlock initial b tx_il)
+        (h_evil_appendable: canAppendToBlock initial b tx_evil) :
+        ¬ canAppendToBlock initial
+            { b with transactions := b.transactions ++ [tx_evil] }
+            tx_il
+    ```
+
+    Read: if the IL transaction `tx_il` is appendable to `b`,
+    and a colluding transaction `tx_evil` sharing `tx_il`'s
+    sender is also appendable, then extending `b` with `tx_evil`
+    makes `tx_il` no longer appendable. (Note that the
+    same-sender hypothesis combined with both being appendable
+    to the same state already forces nonce collision; we do not
+    need to assume same-nonce explicitly.)
+
+    Tests/Examples.lean Scenario 13 fires this theorem on
+    concrete data: `tx_il` is the IL transaction at sender 100,
+    nonce 0; `tx_evil` is a colluding tx sharing the same
+    sender; the proposer extends an empty block with `tx_evil`
+    and `tx_il` becomes non-appendable.
+
+The cost of this attack is one gas-fee payment for `tx_evil`,
+with no slashing penalty (the attacker is not equivocating;
+they are just transacting). The protocol-level question for
+the EIP authors:
+
+- Should the EIP commit to a per-account-state abstraction
+  that the proposer must respect (e.g., snapshot the
+  pre-state before any transaction the proposer submits in
+  the same slot)? Or
+- Is the cost of broadcasting a zero-effect transaction
+  considered prohibitive enough that the attack is not worth
+  preventing?
+
+**Cross-reference:** §4.3 explains why `CanAppend` in the main
+safety chain is opaque; §2.5 explains why even a refined
+`CanAppend` would not, on its own, recover sequential
+dependence between IL transactions.
 
 ### 2.4 Equivocation as a censorship channel
 
@@ -799,11 +855,18 @@ The contribution of this repository is:
    finding §2.7: the honest-attester invariant must be
    relativized to the attester's local store, not universally
    quantified.
-7. This `FINDINGS.md`, with **two substantive observations**
-   (§2.4 and §2.7) that the formalization surfaced, plus
-   spec-hygiene issues (§1.2, §1.3, §2.1) and disclosed model
-   limitations (§2.5, §2.6). Smaller cross-references in
-   §1.1, §1.4, §2.2, and §2.3 round out the document.
+7. A **nonce-only account-state model**
+   (`Focil/AccountState.lean`) and a theorem
+   `front_running_breaks_appendability` that formalizes the
+   adversarial-validity attack from §2.3 on a concrete
+   realization of EVM-validity. Scenario 13 fires the attack
+   on concrete data. This is a _companion_ result to the main
+   safety theorems, not a refinement of them.
+8. This `FINDINGS.md`, with **three substantive observations**
+   (§2.3, §2.4, and §2.7) that the formalization surfaced,
+   plus spec-hygiene issues (§1.2, §1.3, §2.1) and disclosed
+   model limitations (§2.5, §2.6). Smaller cross-references
+   in §1.1, §1.4, and §2.2 round out the document.
 
 What the safety theorems do **not** prove:
 

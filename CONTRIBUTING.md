@@ -58,6 +58,7 @@ import FocilLean4
 #print axioms Focil.canonical_implies_compliant
 #print axioms Focil.AttesterRun.toForkChoice
 #print axioms Focil.focil_pos_derived_safety
+#print axioms Focil.front_running_breaks_appendability
 ```
 
 Run:
@@ -75,14 +76,15 @@ Expected output:
 'Focil.canonical_implies_compliant' does not depend on any axioms
 'Focil.AttesterRun.toForkChoice' depends on axioms: [propext, Quot.sound]
 'Focil.focil_pos_derived_safety' depends on axioms: [propext, Quot.sound]
+'Focil.front_running_breaks_appendability' depends on axioms: [propext, Quot.sound]
 ```
 
 The four pure safety theorems depend on **zero** kernel
-axioms. The PoS-derived layer additionally uses `propext` and
-`Quot.sound`, two foundational kernel axioms that ship with
-every Lean installation. `Classical.choice` and `sorryAx` are
-not used anywhere; if any line lists either, that is a
-regression. Please file an issue.
+axioms. The PoS-derived layer and the nonce-only account-state
+layer both use `propext` and `Quot.sound`, two foundational
+kernel axioms that ship with every Lean installation.
+`Classical.choice` and `sorryAx` are not used anywhere; if any
+line lists either, that is a regression. Please file an issue.
 
 ## Concrete contribution opportunities
 
@@ -118,13 +120,21 @@ straightforward way. Doing this would let the formalization
 reflect Ethereum's actual stake-weighted PoS without changing
 the headline theorem statement.
 
-### 3. Concrete `CanAppend` from a per-account state abstraction
+### 3. Refined `CanAppend` covering balance and AA dimensions
 
-Current `CanAppend` is `opaque`. A refined version would model
-sender nonces and balances explicitly, enabling proofs about
-adversarial validity changes (the EOA-nonce-bumping and
-balance-drain attacks described in
-[FINDINGS.md §2.3](FINDINGS.md#23-adversarial-validity-changes)).
+The current account-state model in `Focil/AccountState.lean`
+tracks nonces only and proves the front-running attack from
+[FINDINGS.md §2.3](FINDINGS.md#23-adversarial-validity-changes)
+as the theorem `front_running_breaks_appendability`. Two
+follow-on extensions are natural:
+
+- **Balance-aware variant.** Track per-sender balance and
+  formalize the balance-drain attack. The structural shape is
+  the same as the nonce model; the case analysis surface
+  doubles.
+- **EIP-7702-aware variant.** Add EOA delegation state and
+  formalize the AA-revocation attack. Larger scope; useful as
+  Hegotá's account-abstraction story stabilises.
 
 ### 4. Model `on_inclusion_list` and equivocator detection
 

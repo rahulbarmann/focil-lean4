@@ -49,6 +49,7 @@ jobs:
                   #print axioms Focil.canonical_implies_compliant
                   #print axioms Focil.AttesterRun.toForkChoice
                   #print axioms Focil.focil_pos_derived_safety
+                  #print axioms Focil.front_running_breaks_appendability
                   EOF
                   OUTPUT=$(lake env lean AuditAxioms.lean)
                   echo "$OUTPUT"

@@ -87,6 +87,20 @@ a thin existential-elimination corollary.
 transaction cannot become canonical. Useful as a builder-side
 incentive statement.
 
+**Adversarial-validity attack, formalized**
+(`Focil.front_running_breaks_appendability`, in
+[`Focil/AccountState.lean`](Focil/AccountState.lean)). One
+specific way the `CanAppend` hypothesis can be defeated by an
+adversary: a colluding party submits a transaction sharing an
+IL transaction's sender; once the proposer appends it, the IL
+transaction's nonce is stale and it is no longer appendable.
+The theorem captures this attack at the level of the
+appendability predicate, on a nonce-only account-state
+realization. This is _separate from_ the main safety theorem;
+the main theorem still quantifies over arbitrary `CanAppend`.
+What this companion theorem formalizes is one specific
+realization of the threat model in FINDINGS.md §2.3.
+
 **The proof depends on:**
 
 1. The abstract opaque predicate
@@ -178,9 +192,10 @@ focil-lean4/
 │   ├── ForkChoice.lean          # ForkChoice structure + canonicality lemma
 │   ├── Helpers.lean             # small reusable lemmas
 │   ├── Safety.lean              # headline theorem and per-IL building block
-│   └── StakeModel.lean          # PoS-derived ForkChoice; >2/3 honest assumption
+│   ├── StakeModel.lean          # PoS-derived ForkChoice; >2/3 honest assumption
+│   └── AccountState.lean        # nonce-only EVM-validity model; FINDINGS §2.3
 ├── Tests/
-│   └── Examples.lean            # 12 worked scenarios; concrete ForkChoice instances
+│   └── Examples.lean            # 13 worked scenarios; concrete ForkChoice instances
 └── .github/
     ├── workflows/ci.yml         # CI: build, type-check, axiom audit
     └── ISSUE_TEMPLATE/          # issue and PR templates
@@ -219,16 +234,21 @@ suggested order:
    `AttesterRun`, proves the counting lemma, and supplies
    `AttesterRun.toForkChoice` plus the end-to-end
    `focil_pos_derived_safety`.
-8. **[`Tests/Examples.lean`](Tests/Examples.lean)**: twelve
+8. **[`Focil/AccountState.lean`](Focil/AccountState.lean)**:
+   the nonce-only EVM-validity model. Formalizes the
+   front-running attack from FINDINGS §2.3 as the theorem
+   `front_running_breaks_appendability`.
+9. **[`Tests/Examples.lean`](Tests/Examples.lean)**: thirteen
    concrete scenarios. Scenario 12 fires the PoS-derived
-   end-to-end theorem; Scenario 11 fires the 1-of-N theorem
-   on the abstract `ForkChoice`; Scenarios 6–10 fire the
-   per-IL building block, the contrapositive, and the
+   end-to-end theorem; Scenario 13 fires the front-running
+   attack on concrete data; Scenario 11 fires the 1-of-N
+   theorem on the abstract `ForkChoice`; Scenarios 6–10 fire
+   the per-IL building block, the contrapositive, and the
    equivocator degradation.
-9. **[`FINDINGS.md`](FINDINGS.md)**: the research log; nine
-   items spanning spec gaps, model limits, and the
-   abstraction-level discovery (§2.7) that emerged from
-   building the non-vacuous instance.
+10. **[`FINDINGS.md`](FINDINGS.md)**: the research log; nine
+    items spanning spec gaps, model limits, and the
+    abstraction-level discoveries that emerged from building
+    the formalization.
 
 ---
 
@@ -255,6 +275,7 @@ import FocilLean4
 #print axioms Focil.canonical_implies_compliant
 #print axioms Focil.AttesterRun.toForkChoice
 #print axioms Focil.focil_pos_derived_safety
+#print axioms Focil.front_running_breaks_appendability
 ```
 
 and run:
@@ -272,6 +293,7 @@ You should see:
 'Focil.canonical_implies_compliant' does not depend on any axioms
 'Focil.AttesterRun.toForkChoice' depends on axioms: [propext, Quot.sound]
 'Focil.focil_pos_derived_safety' depends on axioms: [propext, Quot.sound]
+'Focil.front_running_breaks_appendability' depends on axioms: [propext, Quot.sound]
 ```
 
 CI runs this check on every push (see
@@ -284,7 +306,7 @@ theorems acquires _any_ axiom dependency.
 
 ## Spec findings
 
-Two of the items the formalization surfaced are substantive
+Three of the items the formalization surfaced are substantive
 research observations; the rest are spec-hygiene issues and
 disclosed model limitations.
 
@@ -313,6 +335,16 @@ disclosed model limitations.
   Demonstrated by example in `Tests/Examples.lean` Scenarios
   9–10.
   ([§2.4](FINDINGS.md#24-equivocation-as-a-censorship-channel))
+
+- **Adversarial validity changes are formally exhibited.** A
+  colluding party sharing an IL transaction's sender can
+  submit a transaction that, once appended by the proposer,
+  makes the IL transaction non-appendable. Formalized as
+  `front_running_breaks_appendability` in
+  [`Focil/AccountState.lean`](Focil/AccountState.lean), with
+  Scenario 13 demonstrating the attack on concrete data. The
+  attacker pays one gas fee with no slashing penalty.
+  ([§2.3](FINDINGS.md#23-adversarial-validity-changes))
 
 **Spec-hygiene issues:**
 
@@ -398,10 +430,14 @@ through the appendability check. This directly addresses
 
 **Other contribution opportunities, ordered by leverage:**
 
-1. **Concrete `CanAppend`** built from a per-account
-   nonce/balance abstraction, enabling proofs about
-   adversarial validity changes.
-   ([FINDINGS.md §2.3](FINDINGS.md#23-adversarial-validity-changes))
+1. **Refined `CanAppend` covering balance and AA dimensions.**
+   The current account-state model in
+   [`Focil/AccountState.lean`](Focil/AccountState.lean) tracks
+   nonces only. A balance-aware variant would let us formalize
+   the balance-drain attack from
+   [FINDINGS.md §2.3](FINDINGS.md#23-adversarial-validity-changes);
+   an EIP-7702-aware variant would cover the AA-revocation
+   attack.
 2. **Equivocator-detection model.** Formalize
    `on_inclusion_list` and prove that a faithful execution
    correctly populates `state.equivocators`.
