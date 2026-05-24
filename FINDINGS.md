@@ -30,7 +30,7 @@ FORMALIZATION` (the formalization handles it directly).
 
 This formalization proves FOCIL's 1-of-N censorship-resistance
 guarantee end-to-end, derived from Ethereum's standard ">2/3
-honest validators" assumption. Two of the items below are
+honest validators" assumption. Three of the items below are
 substantive observations the formalization surfaced; the rest
 are spec-hygiene issues and disclosed model limitations.
 

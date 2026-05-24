@@ -387,7 +387,7 @@ property is "1-out-of-N" honesty among committee members.
 
 FOCIL is the headline feature of Ethereum's late-2026 Hegotá
 hard fork, scheduled to follow Glamsterdam. Vitalik Buterin's
-[_A shallow dive into formal verification_](https://vitalik.eth.limo/)
+[_A shallow dive into formal verification_](https://vitalik.eth.limo/general/2026/05/18/fv.html)
 (May 18, 2026) sharpened the case for taking machine-checked
 proofs of consensus-layer mechanisms seriously, and was a
 direct motivation for this work.

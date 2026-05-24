@@ -257,10 +257,12 @@ file:
    propositional obligations are the load-bearing assumptions
    of the safety theorem; everything else is plumbing.
 4. **`Focil/Safety.lean`**: what _follows_. Two short proofs.
-5. **`Tests/Examples.lean`**: the model in action. Ten
-   scenarios spanning compliance rule, vacuous instance,
-   non-vacuous 3-validator instance, and equivocator
-   degradation.
+5. **`Tests/Examples.lean`**: the model in action. Thirteen
+   scenarios spanning the compliance rule, the vacuous
+   instance, the non-vacuous 3-validator instance, the
+   equivocator degradation, the headline 1-of-N theorem, the
+   PoS-derived end-to-end theorem, and the front-running
+   attack on a concrete account-state.
 
 The most subtle piece is `ForkChoice` (§5 above). If you
 disagree with that abstraction, the rest of the proofs are
